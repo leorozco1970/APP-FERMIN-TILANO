@@ -1,0 +1,169 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=Montserrat:wght@400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-headings: "Outfit", "Montserrat", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-montserrat: "Montserrat", sans-serif;
+  
+  /* Executive Dark Color Palette */
+  --color-brand-primary: #020617;
+  --color-brand-accent: #3b82f6;
+  --color-brand-gold: #C5A059;
+  --color-brand-silver: #C0C0C0;
+  --color-executive-dark-bg: #020617;
+  --color-executive-surface: #0a0a0a;
+  --color-executive-border: #1e1e1e;
+  --color-executive-text: #E5E7EB;
+
+  --animate-fade-in-up: fade-in-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-fade-in-right: fade-in-right 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-pulse-slow: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@layer base {
+  body {
+    @apply antialiased text-gray-300 bg-[#020617];
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Rule 1: Brute Force Table Hardening */
+  table {
+    table-layout: fixed !important;
+    width: 100% !important;
+    border-collapse: collapse;
+  }
+
+  td, th {
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important;
+    white-space: normal !important;
+    vertical-align: top;
+  }
+
+  /* Rule 1: Master Container Hardening */
+  .master-container {
+    max-width: 100% !important;
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+
+  /* Dropdown (Select) Visibility Fix */
+  select {
+    @apply appearance-none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 1rem center;
+    background-repeat: no-repeat;
+    background-size: 1.25em 1.25em;
+    padding-right: 2.5rem;
+    color: white !important;
+    background-color: rgba(0, 0, 0, 0.4) !important;
+  }
+
+  select option {
+    background-color: #0f172a !important;
+    color: white !important;
+    padding: 12px !important;
+  }
+
+  /* Custom Scrollbar for better dark mode visibility */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-black/20;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
+  }
+}
+
+/* Glass Surface Utility for Dark Executive */
+.glass-surface {
+  @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-2xl;
+}
+
+/* Executive Card Pattern - Dark Mode */
+.executive-card {
+  @apply bg-[#1A1A1A] rounded-[2.5rem] shadow-[0_15px_35px_-5px_rgba(0,0,0,0.5)] border border-[#2D2D2D] transition-all duration-300;
+}
+
+.executive-card:hover {
+  @apply shadow-[0_25px_60px_-15px_rgba(0,0,0,0.7)] border-white/10;
+}
+
+/* Professional Input Styles - Dark Mode */
+.executive-input {
+  @apply w-full px-6 py-4 rounded-2xl border-2 border-[#2D2D2D] bg-[#0A0A0A] focus:bg-[#111111] focus:border-[#3b82f6] focus:ring-4 focus:ring-[#3b82f6]/10 focus:outline-none transition-all text-sm font-bold text-white;
+}
+
+/* Custom Executive Scrollbar - Dark Mode */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full transition-colors;
+}
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  @apply bg-white/20;
+}
+
+/* Sidebar Specific Scrollbar Dark Mode */
+aside .custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-white/10;
+}
+aside .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  @apply bg-white/20;
+}
+
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.4);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(0.99);
+    box-shadow: 0 0 0 10px rgba(79, 70, 229, 0);
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-cascade-1 { opacity: 0; animation: fade-in-up 0.5s ease-out 0.1s forwards; }
+.animate-cascade-2 { opacity: 0; animation: fade-in-up 0.5s ease-out 0.2s forwards; }
+.animate-cascade-3 { opacity: 0; animation: fade-in-up 0.5s ease-out 0.3s forwards; }
+.animate-cascade-4 { opacity: 0; animation: fade-in-up 0.5s ease-out 0.4s forwards; }
+.animate-cascade-5 { opacity: 0; animation: fade-in-up 0.5s ease-out 0.5s forwards; }
+.animate-cascade-6 { opacity: 0; animation: fade-in-up 0.5s ease-out 0.6s forwards; }
+.animate-cascade-7 { opacity: 0; animation: fade-in-up 0.5s ease-out 0.7s forwards; }
+.animate-cascade-8 { opacity: 0; animation: fade-in-up 0.5s ease-out 0.8s forwards; }

@@ -1,0 +1,333 @@
+{
+  "entities": {
+    "ActaConvivencia": {
+      "title": "Acta de Convivencia",
+      "description": "Registro de actas de convivencia (Tipo I, II, III) de estudiantes",
+      "type": "object",
+      "properties": {
+        "periodo": { "type": "string", "enum": ["I", "II", "III"] },
+        "docente": { "type": "string" },
+        "grado": { "type": "string" },
+        "area": { "type": "string" },
+        "estudiantes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nombre": { "type": "string" },
+              "tipo1": { "type": "number" },
+              "tipo2": { "type": "number" },
+              "tipo3": { "type": "number" }
+            },
+            "required": ["nombre", "tipo1", "tipo2", "tipo3"]
+          }
+        },
+        "authorUid": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["periodo", "docente", "grado", "area", "estudiantes", "authorUid", "createdAt", "updatedAt"]
+    },
+    "ConfigLists": {
+      "title": "Configuración de Listas",
+      "description": "Listas personalizables de docentes y áreas",
+      "type": "object",
+      "properties": {
+        "docentes": { "type": "array", "items": { "type": "string" } },
+        "areas": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["docentes", "areas"]
+    },
+    "Reporte": {
+      "title": "Reporte Académico",
+      "description": "Reporte de seguimiento académico de un docente para un grado, área y periodo específico",
+      "type": "object",
+      "properties": {
+        "periodo": { "type": "string", "enum": ["I", "II", "III"] },
+        "docente": { "type": "string" },
+        "grado": { "type": "string" },
+        "area": { "type": "string" },
+        "totalEstudiantes": { "type": "number" },
+        "estudiantesPreventivo": { "type": "array", "items": { "type": "string" } },
+        "estudiantesPierden": { "type": "array", "items": { "type": "string" } },
+        "estrategias": { "type": "array", "items": { "type": "string" } },
+        "barreras": { "type": "array", "items": { "type": "string" } },
+        "authorUid": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["periodo", "docente", "grado", "area", "totalEstudiantes", "authorUid", "createdAt", "updatedAt"]
+    },
+    "Matricula": {
+      "title": "Matrícula de Grado",
+      "description": "Cantidad total de estudiantes matriculados en un grado específico",
+      "type": "object",
+      "properties": {
+        "grado": { "type": "string" },
+        "totalEstudiantes": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["grado", "totalEstudiantes", "updatedAt"]
+    },
+    "EstudianteSIMAT": {
+      "title": "Registro de Apoyo Especial (SIMAT)",
+      "description": "Estudiante con trastornos o discapacidades registrados en el sistema SIMAT",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string" },
+        "grado": { "type": "string" },
+        "categoria": { "type": "string" },
+        "diagnosticado": { "type": "string", "enum": ["SI", "NO"] },
+        "recomendaciones": { "type": "string" },
+        "apoyoExterno": { "type": "string" },
+        "piarStatus": { "type": "string", "enum": ["SI", "NO"] },
+        "driveUrl": { "type": "string", "format": "uri" },
+        "observaciones": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "texto": { "type": "string" },
+              "docente": { "type": "string" },
+              "fecha": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nombre", "grado", "categoria", "diagnosticado", "piarStatus", "updatedAt"]
+    },
+    "Retirado": {
+      "title": "Registro de Retiro",
+      "description": "Información sobre el retiro o deserción de un estudiante",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string" },
+        "grado": { "type": "string" },
+        "fechaRetiro": { "type": "string", "format": "date" },
+        "motivo": { "type": "string" },
+        "observaciones": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nombre", "grado", "fechaRetiro", "motivo", "authorUid", "createdAt"]
+    },
+    "Estudiante": {
+      "title": "Registro de Estudiante",
+      "description": "Información base de un estudiante en el sistema",
+      "type": "object",
+      "properties": {
+        "nombre": { "type": "string" },
+        "grado": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nombre", "grado", "createdAt"]
+    },
+    "EvaluacionReport": {
+      "title": "Reporte de Evaluación Institucional",
+      "description": "Evaluación periódica de las áreas de gestión institucional (Directiva, Académica, Comunitaria, Financiera)",
+      "type": "object",
+      "properties": {
+        "gestion": { "type": "string", "enum": ["DIRECTIVA", "ACADEMICA", "COMUNITARIA", "FINANCIERA"] },
+        "titulo": { "type": "string" },
+        "descripcion": { "type": "string" },
+        "año": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["gestion", "titulo", "descripcion", "año", "authorEmail", "createdAt", "updatedAt"]
+    },
+    "PlanArea": {
+      "title": "Plan de Área",
+      "description": "Documento de planeación curricular por área o asignatura",
+      "type": "object",
+      "properties": {
+        "fechaEntrega": { "type": "string", "format": "date" },
+        "area": { "type": "string" },
+        "responsables": { "type": "string" },
+        "version": { "type": "string" },
+        "documentUrl": { "type": "string", "format": "uri" },
+        "authorEmail": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fechaEntrega", "area", "responsables", "version", "documentUrl", "authorEmail", "createdAt"]
+    },
+    "PlanAula": {
+      "title": "Plan de Aula",
+      "description": "Planeación pedagógica de aula registrada por el docente",
+      "type": "object",
+      "properties": {
+        "fecha": { "type": "string", "format": "date" },
+        "periodo": { "type": "string", "enum": ["I", "II", "III"] },
+        "docente": { "type": "string" },
+        "area": { "type": "string" },
+        "grado": { "type": "string" },
+        "fechaInicio": { "type": "string", "format": "date" },
+        "fechaFin": { "type": "string", "format": "date" },
+        "aprendizaje": { "type": "string" },
+        "competencia": { "type": "string" },
+        "evidencia": { "type": "string" },
+        "documentUrl": { "type": "string", "format": "uri" },
+        "authorEmail": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fecha", "periodo", "docente", "area", "grado", "fechaInicio", "fechaFin", "documentUrl", "authorEmail", "authorUid", "createdAt"]
+    },
+    "ProyectoTransversal": {
+      "title": "Proyecto Transversal",
+      "description": "Registro de proyectos pedagógicos obligatorios y actividades",
+      "type": "object",
+      "properties": {
+        "fechaEntrega": { "type": "string", "format": "date" },
+        "docentesResponsables": { "type": "string" },
+        "proyecto": { "type": "string" },
+        "periodo": { "type": "string" },
+        "url": { "type": "string" },
+        "areasArticuladas": { "type": "array", "items": { "type": "string" } },
+        "actividades": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "fecha": { "type": "string" },
+              "descripcion": { "type": "string" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fechaEntrega", "docentesResponsables", "proyecto", "periodo", "createdAt"]
+    },
+    "ConstruccionPFI": {
+      "title": "Construcción del Plan de Formación Integral (PFI)",
+      "description": "Registro completo para la construcción y estructuración del Plan de Formación Integral institucional",
+      "type": "object",
+      "properties": {
+        "institucion": { "type": "string" },
+        "codigoDane": { "type": "string" },
+        "lecturaContexto": { "type": "string", "enum": ["Sí", "No"] },
+        "fortalezas": { "type": "string" },
+        "oportunidadesMejora": { "type": "string" },
+        "objetivoGeneral": { "type": "string" },
+        "objetivosEspecificos": { "type": "string" },
+        "registrosNecesidades": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "necesidadPriorizada": { "type": "string" },
+              "metas": { "type": "string" },
+              "accionesDesarrollo": { "type": "string" },
+              "armonizacionCurricular": { "type": "string" },
+              "productosEvidencias": { "type": "string" },
+              "recursos": { "type": "string" },
+              "responsables": { "type": "string" },
+              "cronograma": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "actividad": { "type": "string" },
+                    "fecha": { "type": "string" }
+                  }
+                }
+              },
+              "accionesSeguimiento": { "type": "string" },
+              "observaciones": { "type": "string" }
+            }
+          }
+        },
+        "authorUid": { "type": "string" },
+        "authorEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["institucion", "codigoDane", "lecturaContexto", "objetivoGeneral", "authorUid", "createdAt", "updatedAt"]
+    },
+    "PFIMeta": {
+      "title": "Meta PFI",
+      "description": "Meta individual de seguimiento del Plan de Formación Integral",
+      "type": "object",
+      "properties": {
+        "fecha": { "type": "string", "format": "date" },
+        "directivo": { "type": "string" },
+        "tutor": { "type": "string" },
+        "meta": { "type": "string" },
+        "acciones": { "type": "string" },
+        "categoria": { "type": "string" },
+        "avance": { "type": "string" },
+        "dificultad": { "type": "string" },
+        "accionesMejora": { "type": "string" },
+        "responsable": { "type": "string" },
+        "estadoAvance": { "type": "string" },
+        "evidencia": { "type": "string", "format": "uri" },
+        "evidenciaNombre": { "type": "string" },
+        "impactoArmonizacion": { "type": "string" },
+        "dimensiones": { "type": "array", "items": { "type": "string" } },
+        "authorUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fecha", "directivo", "tutor", "meta", "acciones", "categoria", "avance", "responsable", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/config/lists": {
+      "schema": { "$ref": "#/entities/ConfigLists" },
+      "description": "Documento único para listas configurables"
+    },
+    "/actas_convivencia/{actaId}": {
+      "schema": { "$ref": "#/entities/ActaConvivencia" },
+      "description": "Colección de actas de convivencia"
+    },
+    "/reportes/{reporteId}": {
+      "schema": { "$ref": "#/entities/Reporte" },
+      "description": "Colección de reportes académicos"
+    },
+    "/matriculas/{gradoId}": {
+      "schema": { "$ref": "#/entities/Matricula" },
+      "description": "Colección estática de matrícula por grado"
+    },
+    "/discapacidades/{docId}": {
+      "schema": { "$ref": "#/entities/EstudianteSIMAT" },
+      "description": "Colección de estudiantes con necesidades especiales"
+    },
+    "/estudiantes/{estudianteId}": {
+      "schema": { "$ref": "#/entities/Estudiante" },
+      "description": "Colección base de estudiantes por grado"
+    },
+    "/evaluacion_institucional/{reportId}": {
+      "schema": { "$ref": "#/entities/EvaluacionReport" },
+      "description": "Colección de reportes de evaluación institucional por área de gestión"
+    },
+    "/planes_area/{planId}": {
+      "schema": { "$ref": "#/entities/PlanArea" },
+      "description": "Colección de planes de área registrados por docentes"
+    },
+    "/planes_aula/{planId}": {
+      "schema": { "$ref": "#/entities/PlanAula" },
+      "description": "Colección de planes de aula institucionales registrados por docentes"
+    },
+    "/proyectos_transversales/{proyectoId}": {
+      "schema": { "$ref": "#/entities/ProyectoTransversal" },
+      "description": "Colección de proyectos pedagógicos transversales"
+    },
+    "/pfi_metas/{metaId}": {
+      "schema": { "$ref": "#/entities/PFIMeta" },
+      "description": "Colección de seguimiento individual de metas PFI"
+    },
+    "/construccion_pfi/{pfiId}": {
+      "schema": { "$ref": "#/entities/ConstruccionPFI" },
+      "description": "Colección de planes de formación integral construidos"
+    }
+  }
+}

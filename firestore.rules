@@ -1,0 +1,253 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+  
+    // ==========================================
+    // GLOBAL DENY CATCH-ALL
+    // ==========================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==========================================
+    // PRIMITIVES & HELPERS
+    // ==========================================
+    function isSignedIn() { return request.auth != null; }
+    
+    // allow anonymous as they are gated by app password
+    function isVerified() { 
+      return isSignedIn() && (
+        request.auth.token.email_verified == true || 
+        request.auth.token.firebase.sign_in_provider == 'anonymous'
+      ); 
+    }
+    
+    // Explicit admin check
+    function isAdmin() { 
+      return isSignedIn() && (
+        request.auth.token.email == "leorozco1970@gmail.com" ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      ); 
+    }
+
+    function isOwner(authorUid) { 
+      return isSignedIn() && request.auth.uid == authorUid; 
+    }
+
+    function isOwnerByEmail(authorEmail) {
+      return isSignedIn() && request.auth.token.email == authorEmail;
+    }
+
+    function isValidId(id) { 
+      return id is string && id.size() <= 128; // Relaxed for local characters
+    }
+
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isString(val, max) { return val is string && val.size() <= max; }
+    function isEmail(email) { return isString(email, 128) && email.matches('^[^@]+@[^@]+\\.[^@]+$'); }
+    function isTimestamp(val) { return val == request.time || val is string; }
+
+    // ==========================================
+    // VALIDATION BLUEPRINTS
+    // ==========================================
+
+    function isValidReporte(data) {
+      return (
+        data.keys().hasAll(['periodo', 'docente', 'grado', 'area', 'totalEstudiantes', 'updatedAt']) &&
+        isString(data.periodo, 20) &&
+        isString(data.docente, 100) &&
+        isString(data.grado, 50) &&
+        isString(data.area, 100) &&
+        data.totalEstudiantes is int &&
+        isTimestamp(data.updatedAt)
+      );
+    }
+
+    function isValidActaConvivencia(data) {
+      return (
+        data.keys().hasAll(['periodo', 'fecha', 'docente', 'grado', 'area', 'estudiantes', 'updatedAt']) &&
+        isString(data.periodo, 20) &&
+        isString(data.fecha, 20) &&
+        isString(data.docente, 100) &&
+        isString(data.grado, 50) &&
+        isString(data.area, 100) &&
+        data.estudiantes is list &&
+        isTimestamp(data.updatedAt)
+      );
+    }
+
+    function isValidProyectoPedagogico(data) {
+      return (
+        data.keys().hasAll(['docente', 'area', 'tipoEstrategia', 'nombreEstrategia', 'updatedAt']) &&
+        isString(data.docente, 100) &&
+        isString(data.area, 100) &&
+        isString(data.tipoEstrategia, 100) &&
+        isString(data.nombreEstrategia, 200) &&
+        isTimestamp(data.updatedAt)
+      );
+    }
+
+    function isValidArticulacion(data) {
+      return (
+        data.keys().hasAll(['proyectoId', 'nombreEstrategia', 'docente', 'updatedAt']) &&
+        isString(data.proyectoId, 128) &&
+        isString(data.nombreEstrategia, 200) &&
+        isString(data.docente, 100) &&
+        isTimestamp(data.updatedAt)
+      );
+    }
+
+    function isValidPFIMeta(data) {
+      return (
+        data.keys().hasAll(['fecha', 'directivo', 'meta', 'updatedAt']) &&
+        isString(data.fecha, 20) &&
+        isString(data.directivo, 100) &&
+        isString(data.meta, 5000) &&
+        isTimestamp(data.updatedAt)
+      );
+    }
+
+    // ==========================================
+    // COLLECTION RULES
+    // ==========================================
+
+    // Reportes
+    match /reportes/{reporteId} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isValidReporte(incoming()) && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isValidReporte(incoming());
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // Matriculas
+    match /matriculas/{gradoId} {
+      allow read: if isSignedIn();
+      allow write: if isVerified() && isValidId(gradoId);
+    }
+
+    // Discapacidades (SIMAT)
+    match /discapacidades/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isTimestamp(incoming().updatedAt);
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // Actas Convivencia
+    match /actas_convivencia/{actaId} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isValidActaConvivencia(incoming()) && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isValidActaConvivencia(incoming());
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // Proyectos Pedagogicos
+    match /proyectos_pedagogicos/{proyectoId} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isValidProyectoPedagogico(incoming()) && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isValidProyectoPedagogico(incoming());
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // Articulacion Curricular
+    match /articulacion_curricular/{artId} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isValidArticulacion(incoming()) && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isValidArticulacion(incoming());
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // PFI Metas
+    match /pfi_metas/{metaId} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isValidPFIMeta(incoming()) && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isValidPFIMeta(incoming());
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // Evaluacion Institucional
+    match /evaluacion_institucional/{id} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isTimestamp(incoming().updatedAt);
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // Planes de Area
+    match /planes_area/{id} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isTimestamp(incoming().updatedAt);
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // Proyectos Transversales
+    match /proyectos_transversales/{id} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isTimestamp(incoming().updatedAt);
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // Planes de Aula
+    match /planes_aula/{id} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && (isOwner(existing().authorUid) || isAdmin());
+      allow delete: if isVerified() && (isOwner(existing().authorUid) || isAdmin());
+    }
+
+    // Estudiantes
+    match /estudiantes/{id} {
+      allow read: if isSignedIn();
+      allow write: if isVerified();
+    }
+    
+    // Retirados
+    match /retirados/{id} {
+      allow read: if isSignedIn();
+      allow write: if isVerified();
+    }
+
+    // Estudiantes Inclusion (PIAR)
+    match /estudiantes_inclusion/{id} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isTimestamp(incoming().updatedAt);
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // PFI Construction
+    match /construccion_pfi/{id} {
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isTimestamp(incoming().createdAt);
+      allow update: if isVerified() && isTimestamp(incoming().updatedAt);
+      allow delete: if isAdmin() || isVerified();
+    }
+
+    // Config & Settings
+    match /config/{id} {
+      allow read: if isSignedIn();
+      allow write: if isVerified();
+    }
+    
+    match /pfi_settings/main_document {
+      allow read: if isSignedIn();
+      allow write: if isVerified();
+    }
+
+    match /settings/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Login History (System logging)
+    match /login_history/{id} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn(); // Allow creating entry on login
+      allow delete: if isAdmin();
+    }
+  }
+}
