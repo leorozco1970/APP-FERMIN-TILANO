@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, onSnapshot, setDoc, doc, addDoc, query, orderBy, serverTimestamp, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, setDoc, doc, addDoc, query, orderBy, serverTimestamp, deleteDoc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { 
   FileText, 
@@ -37,6 +37,8 @@ import {
   getPerfectTableStyles,
   INTRO_TEXTS
 } from '../lib/pdfUtils';
+import { isValidUrl } from '../lib/urlUtils';
+import { RefreshCw } from 'lucide-react';
 
 interface PlanArea {
   id: string;
@@ -105,40 +107,61 @@ export function PlanesAreaAula() {
   const [confirmDeleteType, setConfirmDeleteType] = useState<'AREA' | 'AULA'>('AREA');
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Persistence logic
   useEffect(() => {
-    // Area Plans Listener
-    const qArea = query(collection(db, 'planes_area'), orderBy('createdAt', 'desc'));
-    const unsubArea = onSnapshot(qArea, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanArea));
-      setPlans(data);
-      if (activeTab === 'AREA') setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'planes_area');
-      setLoading(false);
-    });
+    const savedArea = localStorage.getItem('planes_area_draft');
+    const savedAula = localStorage.getItem('planes_aula_draft');
+    if (savedArea) setFormData(JSON.parse(savedArea));
+    if (savedAula) setAulaFormData(JSON.parse(savedAula));
+  }, []);
 
-    // Aula Plans Listener
-    const qAula = query(collection(db, 'planes_aula'), orderBy('createdAt', 'desc'));
-    const unsubAula = onSnapshot(qAula, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanAula));
-      setAulaPlans(data);
-      if (activeTab === 'AULA') setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'planes_aula');
-      setLoading(false);
-    });
+  useEffect(() => {
+    localStorage.setItem('planes_area_draft', JSON.stringify(formData));
+  }, [formData]);
 
-    return () => {
-      unsubArea();
-      unsubAula();
-    };
-  }, [activeTab]);
+  useEffect(() => {
+    localStorage.setItem('planes_aula_draft', JSON.stringify(aulaFormData));
+  }, [aulaFormData]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const qArea = query(collection(db, 'planes_area'), orderBy('createdAt', 'desc'));
+      const qAula = query(collection(db, 'planes_aula'), orderBy('createdAt', 'desc'));
+      
+      const [snapArea, snapAula] = await Promise.all([
+        getDocs(qArea),
+        getDocs(qAula)
+      ]);
+
+      const areaData = snapArea.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanArea));
+      const aulaData = snapAula.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlanAula));
+      
+      setPlans(areaData);
+      setAulaPlans(aulaData);
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.LIST, 'planes');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.area || !formData.responsables || !formData.documentUrl) {
       setModalType('error');
       setModalMessage('POR FAVOR COMPLETE TODOS LOS CAMPOS OBLIGATORIOS.');
+      setModalOpen(true);
+      return;
+    }
+
+    if (!isValidUrl(formData.documentUrl)) {
+      setModalType('error');
+      setModalMessage('EL ENLACE DEL DOCUMENTO NO ES VÁLIDO. POR FAVOR PEGUE UNA URL REAL (HTTP/HTTPS).');
       setModalOpen(true);
       return;
     }
@@ -159,6 +182,7 @@ export function PlanesAreaAula() {
         });
         setModalMessage('PLAN DE ÁREA REGISTRADO CON ÉXITO.');
       }
+      await fetchData();
 
       setModalType('success');
       setModalOpen(true);
@@ -207,6 +231,13 @@ export function PlanesAreaAula() {
       return;
     }
 
+    if (!isValidUrl(aulaFormData.documentUrl)) {
+      setModalType('error');
+      setModalMessage('EL ENLACE DEL PLAN DE AULA NO ES VÁLIDO. PEGUE UNA URL DE GOOGLE DRIVE O SIMILAR.');
+      setModalOpen(true);
+      return;
+    }
+
     try {
       if (editingId) {
         await updateDoc(doc(db, 'planes_aula', editingId), {
@@ -223,6 +254,7 @@ export function PlanesAreaAula() {
         });
         setModalMessage('PLAN DE AULA REGISTRADO CORRECTAMENTE.');
       }
+      await fetchData();
 
       setModalType('success');
       setModalOpen(true);
@@ -269,6 +301,7 @@ export function PlanesAreaAula() {
     const coll = confirmDeleteType === 'AREA' ? 'planes_area' : 'planes_aula';
     try {
       await deleteDoc(doc(db, coll, id));
+      await fetchData();
       setModalType('success');
       setModalMessage('REGISTRO ELIMINADO.');
       setModalOpen(true);
@@ -379,7 +412,19 @@ export function PlanesAreaAula() {
       <PageHeader 
         title="Planes de Área y Aula" 
         description="Gestión integral de la planeación curricular institucional. Organice y haga seguimiento a los planes de área y aula de todos los docentes."
-      />
+      >
+        <div className="flex items-center gap-3 mt-6">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white font-bold py-2.5 px-6 rounded-xl transition-all border border-white/10 disabled:opacity-50 uppercase text-[11px] tracking-widest"
+            title="Actualizar Datos"
+          >
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            Actualizar
+          </button>
+        </div>
+      </PageHeader>
 
       {/* Sub-tabs */}
       <div className="flex gap-4">

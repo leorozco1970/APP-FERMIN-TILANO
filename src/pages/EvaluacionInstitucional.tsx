@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from '../lib/firebase';
 import { 
   collection, 
-  onSnapshot, 
+  getDocs, 
   setDoc, 
   doc, 
   addDoc, 
@@ -12,6 +12,7 @@ import {
   deleteDoc 
 } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+import { isValidUrl } from '../lib/urlUtils';
 import { 
   Save, 
   AlertCircle, 
@@ -34,7 +35,8 @@ import {
   DollarSign,
   Download,
   ExternalLink,
-  Activity
+  Activity,
+  RefreshCw
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -182,9 +184,31 @@ export function EvaluacionInstitucional() {
     periods: ['2024-2025', '2025-2026']
   });
 
+  // Load from localStorage
   useEffect(() => {
-    // Initialize valoraciones based on activeTab
+    const saved = localStorage.getItem(`evaluacion_draft_${activeTab}`);
+    if (saved) {
+      try {
+        setFormData(JSON.parse(saved));
+      } catch (e) {
+        console.error("Error restoring Evaluacion draft", e);
+      }
+    }
+  }, [activeTab]);
+
+  // Save to localStorage
+  useEffect(() => {
+    if (isFormOpen) {
+      localStorage.setItem(`evaluacion_draft_${activeTab}`, JSON.stringify(formData));
+    }
+  }, [formData, activeTab, isFormOpen]);
+
+  useEffect(() => {
+    // Initialize valoraciones based on activeTab ONLY IF no draft exists
     if (activeTab === 'ANALISIS') return;
+
+    const saved = localStorage.getItem(`evaluacion_draft_${activeTab}`);
+    if (saved) return; // Don't override if draft exists
 
     const config = GESTION_CONFIG[activeTab];
     const initialVals: ValoracionItem[] = [];
@@ -231,17 +255,22 @@ export function EvaluacionInstitucional() {
   const [modalMessage, setModalMessage] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const q = query(collection(db, 'evaluacion_institucional'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const q = query(collection(db, 'evaluacion_institucional'), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as EvaluacionReport));
       setReports(data);
-      setLoading(false);
-    }, (error) => {
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.LIST, 'evaluacion_institucional');
+    } finally {
       setLoading(false);
-    });
-    return () => unsubscribe();
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -249,6 +278,13 @@ export function EvaluacionInstitucional() {
     if (!formData.descripcion || !formData.integrantes) {
       setModalType('error');
       setModalMessage('POR FAVOR COMPLETE LOS CAMPOS OBLIGATORIOS (ANALISIS E INTEGRANTES).');
+      setModalOpen(true);
+      return;
+    }
+
+    if (formData.pmiUrl && !isValidUrl(formData.pmiUrl)) {
+      setModalType('error');
+      setModalMessage('LA URL DEL PMI NO ES VÁLIDA. POR FAVOR PEGUE UN LINK REAL (HTTP/HTTPS).');
       setModalOpen(true);
       return;
     }
@@ -281,11 +317,13 @@ export function EvaluacionInstitucional() {
         });
         setModalMessage('EVALUACIÓN REGISTRADA CON ÉXITO.');
       }
+      await fetchData();
 
       setModalType('success');
       setModalOpen(true);
       setIsFormOpen(false);
       setEditingId(null);
+      localStorage.removeItem(`evaluacion_draft_${activeTab}`);
       
       const config = GESTION_CONFIG[activeTab];
       const initialVals: ValoracionItem[] = [];
@@ -318,6 +356,7 @@ export function EvaluacionInstitucional() {
   const handleDelete = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'evaluacion_institucional', id));
+      await fetchData();
       setModalType('success');
       setModalMessage('REGISTRO ELIMINADO.');
       setModalOpen(true);
@@ -423,7 +462,19 @@ export function EvaluacionInstitucional() {
       <PageHeader 
         title="Evaluación Institucional" 
         description="Alineada con los lineamientos de la Guía 34 del MEN, la Autoevaluación Institucional opera como el instrumento técnico y sistemático para auditar el estado de nuestras cuatro áreas de gestión. Este módulo organiza el diagnóstico de la realidad escolar, brindando a directivos y docentes un acceso ágil y directo a los resultados."
-      />
+      >
+        <div className="flex items-center gap-3 mt-6">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white font-bold py-2.5 px-6 rounded-xl transition-all border border-white/10 disabled:opacity-50 uppercase text-[11px] tracking-widest"
+            title="Actualizar Datos"
+          >
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            Actualizar
+          </button>
+        </div>
+      </PageHeader>
 
       {/* Luxury Tab Navigation */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

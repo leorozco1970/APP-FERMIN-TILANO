@@ -2,17 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { 
   FileText, Calendar, Users, GraduationCap, Link2, Plus, Trash2, 
   Eye, Download, Save, Search, CheckCircle2, AlertCircle, Sparkles,
-  BookOpen, Target, Clock, Layers
+  BookOpen, Target, Clock, Layers, RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from '../lib/firebase';
-import { collection, addDoc, getDocs, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, orderBy, serverTimestamp, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { AREAS } from '../lib/constants';
 import { PageHeader } from '../components/PageHeader';
 import { InstitutionalLoading } from '../components/InstitutionalLoading';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import { isValidUrl } from '../lib/urlUtils';
 
 const PROYECTOS_OPTIONS = [
   "Proyecto Ambiental Escolar (PRAE)",
@@ -63,53 +64,78 @@ export function ProyectosTransversales() {
 
   const [status, setStatus] = useState({ text: '', type: '' });
 
+  // Persistence logic - Load
+  useEffect(() => {
+    const saved = localStorage.getItem('proyectos_transversales_draft');
+    if (saved) {
+      try {
+        const data = JSON.parse(saved);
+        setFechaEntrega(data.fechaEntrega || '');
+        setDocentes(data.docentes || '');
+        setProyectoSeleccionado(data.proyectoSeleccionado || PROYECTOS_OPTIONS[0]);
+        setPeriodo(data.periodo || PERIODOS_PROYECTO[2]);
+        setUrl(data.url || '');
+        setSelectedAreas(data.selectedAreas || []);
+        setActividades(data.actividades || []);
+      } catch (e) {
+        console.error("Error restoring Proyectos Transversales draft", e);
+      }
+    }
+  }, []);
+
+  // Persistence logic - Save
+  useEffect(() => {
+    const draft = {
+      fechaEntrega,
+      docentes,
+      proyectoSeleccionado,
+      periodo,
+      url,
+      selectedAreas,
+      actividades
+    };
+    localStorage.setItem('proyectos_transversales_draft', JSON.stringify(draft));
+  }, [fechaEntrega, docentes, proyectoSeleccionado, periodo, url, selectedAreas, actividades]);
+
   const showStatus = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
     setStatus({ text, type });
     setTimeout(() => setStatus({ text: '', type: '' }), 5000);
   };
 
-  useEffect(() => {
-    // Wait for auth to be ready if it's currently null
-    let unsubscribe: () => void = () => {};
-
-    const setupListener = () => {
+  const fetchData = async () => {
+    setLoading(true);
+    try {
       const q = query(collection(db, 'proyectos_transversales'));
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProyectoRegistrado));
-        const sortedList = list.sort((a, b) => {
-          const dateA = a.createdAt?.seconds || 0;
-          const dateB = b.createdAt?.seconds || 0;
-          return dateB - dateA;
-        });
-        setProyectos(sortedList);
-        setLoading(false);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'proyectos_transversales');
-        setLoading(false);
+      const snapshot = await getDocs(q);
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProyectoRegistrado));
+      const sortedList = list.sort((a, b) => {
+        const dateA = a.createdAt?.seconds || 0;
+        const dateB = b.createdAt?.seconds || 0;
+        return dateB - dateA;
       });
-    };
+      setProyectos(sortedList);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'proyectos_transversales');
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     if (auth.currentUser) {
-      setupListener();
+      fetchData();
     } else {
-      // If no user yet, wait a bit or just stop loading if we're sure they're not logged in
-      // But Layout handles redirected to login, so we might just wait or check once
       const authUnsubscribe = auth.onAuthStateChanged((user) => {
         if (user) {
-          setupListener();
+          fetchData();
           authUnsubscribe();
         } else {
           setLoading(false);
           authUnsubscribe();
         }
       });
-      return () => {
-        authUnsubscribe();
-        unsubscribe();
-      };
+      return () => authUnsubscribe();
     }
-
-    return () => unsubscribe();
   }, []);
 
   const exportPDF = (p: ProyectoRegistrado) => {
@@ -179,13 +205,18 @@ export function ProyectosTransversales() {
 
   const handleSave = async () => {
     if (!fechaEntrega || !docentes || !proyectoSeleccionado) {
-      setStatus({ text: 'Complete los campos obligatorios', type: 'error' });
+      setStatus({ text: 'COMPLETE LOS CAMPOS OBLIGATORIOS', type: 'error' });
+      return;
+    }
+
+    if (url && !isValidUrl(url)) {
+      showStatus('LA URL NO ES VÁLIDA. POR FAVOR PEGUE UN LINK REAL (HTTP/HTTPS).', 'error');
       return;
     }
 
     try {
       if (!auth.currentUser) {
-        showStatus('Debe iniciar sesión para guardar', 'error');
+        showStatus('DEBE INICIAR SESIÓN PARA GUARDAR', 'error');
         return;
       }
 
@@ -203,9 +234,11 @@ export function ProyectosTransversales() {
       };
 
       await addDoc(collection(db, 'proyectos_transversales'), data);
+      await fetchData();
       
-      showStatus('Proyecto guardado con éxito', 'success');
+      showStatus('PROYECTO GUARDADO CON ÉXITO', 'success');
       setShowForm(false);
+      localStorage.removeItem('proyectos_transversales_draft');
       resetForm();
     } catch (error: any) {
       handleFirestoreError(error, OperationType.CREATE, 'proyectos_transversales');
@@ -226,6 +259,7 @@ export function ProyectosTransversales() {
     if (!confirm('¿Desea eliminar este registro de proyecto?')) return;
     try {
       await deleteDoc(doc(db, 'proyectos_transversales', id));
+      await fetchData();
       showStatus('Registro eliminado', 'info');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `proyectos_transversales/${id}`);
@@ -462,14 +496,24 @@ export function ProyectosTransversales() {
       </AnimatePresence>
 
       <div className="space-y-6">
-        <div className="flex flex-col items-center gap-2 mb-8 text-center pt-8">
-          <div className="w-12 h-1 bg-[#C5A059]/20 rounded-full mb-2"></div>
-          <div className="flex items-center gap-4">
-            <BookOpen className="text-[#C5A059]" size={20} />
-            <h2 className="text-sm font-black text-white uppercase tracking-[0.4em] italic">Registros Institucionales</h2>
-            <BookOpen className="text-[#C5A059]" size={20} />
+        <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-8 text-center pt-8 px-4">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <div className="w-12 h-1 bg-[#C5A059]/20 rounded-full mb-2"></div>
+            <div className="flex items-center gap-4">
+              <BookOpen className="text-[#C5A059]" size={20} />
+              <h2 className="text-sm font-black text-white uppercase tracking-[0.4em] italic">Registros Institucionales</h2>
+              <BookOpen className="text-[#C5A059]" size={20} />
+            </div>
+            <div className="w-12 h-1 bg-[#C5A059]/20 rounded-full mt-2"></div>
           </div>
-          <div className="w-12 h-1 bg-[#C5A059]/20 rounded-full mt-2"></div>
+          <button 
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center justify-center gap-3 bg-white/5 hover:bg-white/10 text-white px-8 py-4 rounded-2xl transition-all font-black text-[11px] tracking-[0.3em] uppercase border border-white/10 active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+            Actualizar Bitácora
+          </button>
         </div>
 
         {loading ? (

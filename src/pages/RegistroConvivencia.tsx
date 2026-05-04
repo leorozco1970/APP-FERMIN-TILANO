@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDocs, serverTimestamp } from 'firebase/firestore';
+import { collection, query, addDoc, updateDoc, doc, deleteDoc, getDocs, serverTimestamp } from 'firebase/firestore';
 import { PERIODOS, GRADOS, DOCENTES } from '../lib/constants';
 import { Download, Plus, Save, Trash2, Search, CheckCircle2, AlertCircle, RefreshCw, FileOutput, Users, Edit2, Eye } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -9,6 +9,7 @@ import { LOGO_BASE64 } from '../lib/logo';
 import { useCustomLists } from '../hooks/useCustomLists';
 import { drawExecutiveHeader, drawExecutiveFooter, drawWatermark, PDF_COLORS, PDF_MARGIN, INTRO_TEXTS, getPerfectTableStyles } from '../lib/pdfUtils';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+import { useNotification } from '../context/NotificationContext';
 
 interface EstudianteActa {
   nombre: string;
@@ -38,6 +39,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { MessageModal } from '../components/MessageModal';
 
 export function RegistroConvivencia() {
+  const { notify } = useNotification();
   const { docentes: customDocentes, areas: customAreas, addDocente, removeDocente, addArea, removeArea } = useCustomLists();
 
   const [actas, setActas] = useState<ActaConvivencia[]>([]);
@@ -180,21 +182,26 @@ export function RegistroConvivencia() {
     return Array.from(studentsMap.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [actas, filtroPeriodo, filtroGrado]);
 
-  useEffect(() => {
+  const fetchData = async () => {
     if (!auth.currentUser) return;
-    const q = query(collection(db, 'actas_convivencia'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data: ActaConvivencia[] = [];
-      snapshot.forEach((doc) => {
-        data.push({ id: doc.id, ...doc.data() } as ActaConvivencia);
-      });
+    setLoading(true);
+    try {
+      const q = query(collection(db, 'actas_convivencia'));
+      const snapshot = await getDocs(q);
+      const data: ActaConvivencia[] = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data()
+      } as ActaConvivencia));
       setActas(data);
-      setLoading(false);
-    }, (error) => {
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.LIST, 'actas_convivencia');
+    } finally {
       setLoading(false);
-    });
-    return () => unsubscribe();
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -330,6 +337,7 @@ export function RegistroConvivencia() {
 
       if (existing && existing.id) {
         await updateDoc(doc(db, 'actas_convivencia', existing.id), actaData);
+        await fetchData();
         setModalType('success');
         setModalMessage('REGISTRO DE ACTAS ACTUALIZADO CORRECTAMENTE.');
         setIsMessageModalOpen(true);
@@ -338,6 +346,7 @@ export function RegistroConvivencia() {
           ...actaData,
           createdAt: serverTimestamp()
         });
+        await fetchData();
         setModalType('success');
         setModalMessage('REGISTRO DE ACTAS CREADO CORRECTAMENTE.');
         setIsMessageModalOpen(true);
@@ -377,6 +386,7 @@ export function RegistroConvivencia() {
         const snapshot = await getDocs(collection(db, 'actas_convivencia'));
         const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
         await Promise.all(deletePromises);
+        await fetchData();
         setLoading(false);
         setModalType('success');
         setModalMessage('TODOS LOS REGISTROS HAN SIDO ELIMINADOS.');
@@ -585,7 +595,19 @@ export function RegistroConvivencia() {
       <PageHeader 
         title="REGISTROS DE ACTAS DE CONVIVENCIA"
         description="Seguimiento sistemático de compromisos y mediaciones pedagógicas. Garantía del debido proceso y la armonía en la convivencia institucional."
-      />
+      >
+        <div className="flex items-center gap-3 mt-6">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white font-bold py-2.5 px-6 rounded-xl transition-all border border-white/10 disabled:opacity-50 uppercase text-[11px] tracking-widest"
+            title="Actualizar Datos"
+          >
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            Actualizar
+          </button>
+        </div>
+      </PageHeader>
 
       <div className="bg-[#1e1e1e] rounded-[2.5rem] shadow-2xl border border-white/5 overflow-hidden group relative">
         <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 rounded-full blur-[80px] -mr-20 -mt-20 pointer-events-none group-hover:bg-blue-600/10 transition-colors duration-1000" />
@@ -1100,6 +1122,7 @@ export function RegistroConvivencia() {
                                   setOnConfirm(() => async () => {
                                     try {
                                       await deleteDoc(doc(db, 'actas_convivencia', acta.id!));
+                                      setActas(prev => prev.filter(a => a.id !== acta.id));
                                       setModalType('success');
                                       setModalMessage('REGISTRO ELIMINADO CORRECTAMENTE.');
                                       setIsMessageModalOpen(true);
@@ -1159,8 +1182,7 @@ export function RegistroConvivencia() {
                         <td className="py-4 px-8 text-center text-rose-500 font-black font-mono text-xs">{est.tipo3 || '-'}</td>
                         <td className="py-4 px-8 text-center">
                           <div className="flex items-center justify-center gap-2">
-                            {est.driveUrl ? (
-                              <>
+                            {est.driveUrl && (
                                 <button 
                                   onClick={() => window.open(est.driveUrl, '_blank')}
                                   className="text-blue-400 hover:text-blue-300 transition-colors p-2"
@@ -1168,67 +1190,72 @@ export function RegistroConvivencia() {
                                 >
                                   <Eye size={16} />
                                 </button>
-                                <button 
-                                  onClick={() => {
-                                    setPromptMessage(`Editar URL de Acta para ${est.nombre}:`);
-                                    setPromptValue(est.driveUrl);
-                                    setPromptAction(() => (newUrl: string) => {
-                                      // Search for the acta that contains this student to update it
-                                      // Note: This is an approximation since students can be in multiple actas.
-                                      // In this case, we update the latest one we find or just log.
-                                      // Usually, the user wants to update the link they just "made".
-                                      const relatedActa = actas.find(a => 
-                                        a.estudiantes.some(s => s.nombre === est.nombre) &&
-                                        (!filtroPeriodo || a.periodo === filtroPeriodo)
+                            )}
+                            <button 
+                              onClick={() => {
+                                setPromptMessage(`Gestionar URL de Acta para ${est.nombre}:`);
+                                setPromptValue(est.driveUrl || '');
+                                setPromptAction(() => async (newUrl: string) => {
+                                  // Find the latest acta for this student in current filter
+                                  const relatedActa = [...actas].reverse().find(a => 
+                                    a.estudiantes.some(s => s.nombre === est.nombre) &&
+                                    (!filtroPeriodo || a.periodo === filtroPeriodo) &&
+                                    (!filtroGrado || a.grado === filtroGrado)
+                                  );
+                                  
+                                  if (relatedActa && relatedActa.id) {
+                                    const updatedEstudiantes = relatedActa.estudiantes.map(s => 
+                                      s.nombre === est.nombre ? { ...s, driveUrl: newUrl } : s
+                                    );
+                                    try {
+                                      await updateDoc(doc(db, 'actas_convivencia', relatedActa.id), { estudiantes: updatedEstudiantes });
+                                      setActas(prev => prev.map(a => a.id === relatedActa.id ? { ...a, estudiantes: updatedEstudiantes } : a));
+                                      setModalType('success');
+                                      setModalMessage('URL DE ACTA ACTUALIZADA.');
+                                      setIsMessageModalOpen(true);
+                                    } catch (e) {
+                                      notify.error("ERROR AL ACTUALIZAR URL");
+                                    }
+                                  } else {
+                                    setModalType('warning');
+                                    setModalMessage('NO SE ENCONTRÓ UN ACTA RECIENTE PARA ESTE ESTUDIANTE BAJO LOS FILTROS ACTUALES.');
+                                    setIsMessageModalOpen(true);
+                                  }
+                                });
+                                setIsPromptModalOpen(true);
+                              }}
+                              className="text-emerald-500 hover:text-emerald-400 transition-colors p-2"
+                              title={est.driveUrl ? "Editar URL" : "Añadir URL"}
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            {est.driveUrl && (
+                              <button 
+                                onClick={() => {
+                                  setConfirmMessage(`¿ELIMINAR LA URL DE ACTA PARA ${est.nombre}?`);
+                                  setOnConfirm(() => async () => {
+                                    const relatedActa = actas.find(a => 
+                                      a.estudiantes.some(s => s.nombre === est.nombre) &&
+                                      (!filtroPeriodo || a.periodo === filtroPeriodo)
+                                    );
+                                    if (relatedActa && relatedActa.id) {
+                                      const updatedEstudiantes = relatedActa.estudiantes.map(s => 
+                                        s.nombre === est.nombre ? { ...s, driveUrl: '' } : s
                                       );
-                                      
-                                      if (relatedActa && relatedActa.id) {
-                                        const updatedEstudiantes = relatedActa.estudiantes.map(s => 
-                                          s.nombre === est.nombre ? { ...s, driveUrl: newUrl } : s
-                                        );
-                                        updateDoc(doc(db, 'actas_convivencia', relatedActa.id), { estudiantes: updatedEstudiantes })
-                                          .then(() => {
-                                            setModalType('success');
-                                            setModalMessage('URL DE ACTA ACTUALIZADA.');
-                                            setIsMessageModalOpen(true);
-                                          });
-                                      }
-                                    });
-                                    setIsPromptModalOpen(true);
-                                  }}
-                                  className="text-emerald-500 hover:text-emerald-400 transition-colors p-2"
-                                  title="Editar URL"
-                                >
-                                  <Edit2 size={16} />
-                                </button>
-                                <button 
-                                  onClick={() => {
-                                    setConfirmMessage(`¿ELIMINAR LA URL DE ACTA PARA ${est.nombre}?`);
-                                    setOnConfirm(() => async () => {
-                                      const relatedActa = actas.find(a => 
-                                        a.estudiantes.some(s => s.nombre === est.nombre) &&
-                                        (!filtroPeriodo || a.periodo === filtroPeriodo)
-                                      );
-                                      if (relatedActa && relatedActa.id) {
-                                        const updatedEstudiantes = relatedActa.estudiantes.map(s => 
-                                          s.nombre === est.nombre ? { ...s, driveUrl: '' } : s
-                                        );
-                                        await updateDoc(doc(db, 'actas_convivencia', relatedActa.id), { estudiantes: updatedEstudiantes });
-                                        setModalType('success');
-                                        setModalMessage('URL DE ACTA ELIMINADA.');
-                                        setIsMessageModalOpen(true);
-                                      }
-                                    });
-                                    setIsConfirmOpen(true);
-                                  }}
-                                  className="text-rose-500 hover:text-rose-400 transition-colors p-2"
-                                  title="Borrar URL"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </>
-                            ) : (
-                              <span className="text-[10px] font-black text-slate-700 italic">SIN ACTA</span>
+                                      await updateDoc(doc(db, 'actas_convivencia', relatedActa.id), { estudiantes: updatedEstudiantes });
+                                      setActas(prev => prev.map(a => a.id === relatedActa.id ? { ...a, estudiantes: updatedEstudiantes } : a));
+                                      setModalType('success');
+                                      setModalMessage('URL DE ACTA ELIMINADA.');
+                                      setIsMessageModalOpen(true);
+                                    }
+                                  });
+                                  setIsConfirmOpen(true);
+                                }}
+                                className="text-rose-500 hover:text-rose-400 transition-colors p-2"
+                                title="Borrar URL"
+                              >
+                                <Trash2 size={16} />
+                              </button>
                             )}
                           </div>
                         </td>

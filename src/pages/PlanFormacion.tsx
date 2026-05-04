@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db, auth, storage } from '../lib/firebase';
-import { collection, addDoc, query, orderBy, onSnapshot, deleteDoc, doc, updateDoc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc, getDoc, serverTimestamp, getDocs } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Target, Upload, Save, FileOutput, Trash2, Calendar, User, CheckCircle2, AlertTriangle, Lightbulb, ExternalLink, Download, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -11,6 +11,7 @@ import { LOGO_BASE64 } from '../lib/logo';
 import { drawExecutiveHeader, drawExecutiveFooter, drawWatermark, PDF_COLORS, PDF_MARGIN, INTRO_TEXTS, getPerfectTableStyles } from '../lib/pdfUtils';
 import { useCustomLists } from '../hooks/useCustomLists';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+import { isValidUrl } from '../lib/urlUtils';
 
 interface PFIMeta {
   id?: string;
@@ -55,23 +56,6 @@ export function PlanFormacion() {
   const { docentes } = useCustomLists();
   const [metas, setMetas] = useState<PFIMeta[]>([]);
   const [availableMetas, setAvailableMetas] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // For the individual meta form evidence file:
-  const [fileName, setFileName] = useState<string | null>(null);
-  
-  const [systemMessage, setSystemMessage] = useState<{text: string, type: 'success'|'error'} | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-
-  const showMessage = (text: string, type: 'success'|'error' = 'success') => {
-    setSystemMessage({ text, type });
-    setTimeout(() => setSystemMessage(null), 4000);
-  };
-
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
     directivo: '',
@@ -91,41 +75,74 @@ export function PlanFormacion() {
     dimensiones: [] as string[]
   });
 
+  // Draft Persistence
   useEffect(() => {
-    // Fetch individual metas
-    const q = query(collection(db, 'pfi_metas'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const saved = localStorage.getItem('formacion_pfi_draft');
+    if (saved) {
+      try {
+        setFormData(JSON.parse(saved));
+      } catch (e) {
+        console.error("Error restoring PFI draft", e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('formacion_pfi_draft', JSON.stringify(formData));
+  }, [formData]);
+
+  const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // For the individual meta form evidence file:
+  const [fileName, setFileName] = useState<string | null>(null);
+  
+  const [systemMessage, setSystemMessage] = useState<{text: string, type: 'success'|'error'} | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const showMessage = (text: string, type: 'success'|'error' = 'success') => {
+    setSystemMessage({ text, type });
+    setTimeout(() => setSystemMessage(null), 4000);
+  };
+
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      // Fetch individual metas
+      const q = query(collection(db, 'pfi_metas'), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
       const data: PFIMeta[] = [];
       snapshot.forEach((doc) => {
         data.push({ id: doc.id, ...doc.data() } as PFIMeta);
       });
       setMetas(data);
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'pfi_metas');
-      setLoading(false);
-    });
 
-    // Fetch institutional metas from Construction PFI
-    const qPFI = query(collection(db, 'construccion_pfi'), orderBy('createdAt', 'desc'));
-    const unsubscribePFI = onSnapshot(qPFI, (snapshot) => {
+      // Fetch institutional metas from Construction PFI
+      const qPFI = query(collection(db, 'construccion_pfi'), orderBy('createdAt', 'desc'));
+      const snapshotPFI = await getDocs(qPFI);
       const allMetas: string[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        if (data.registrosNecesidades && Array.isArray(data.registrosNecesidades)) {
-          data.registrosNecesidades.forEach((reg: any) => {
+      snapshotPFI.forEach((doc) => {
+        const pfiData = doc.data();
+        if (pfiData.registrosNecesidades && Array.isArray(pfiData.registrosNecesidades)) {
+          pfiData.registrosNecesidades.forEach((reg: any) => {
             if (reg.metas) allMetas.push(reg.metas);
           });
         }
       });
-      // Unique metas
       setAvailableMetas(Array.from(new Set(allMetas)).sort());
-    });
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.LIST, 'pfi_metas');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    return () => {
-      unsubscribe();
-      unsubscribePFI();
-    };
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -223,7 +240,9 @@ export function PlanFormacion() {
           authorUid: auth.currentUser?.uid || 'anonymous',
           createdAt: serverTimestamp()
         });
-        showMessage('Meta registrada exitosamente.', 'success');
+        showMessage(editingId ? 'Meta actualizada exitosamente.' : 'Meta registrada exitosamente.', 'success');
+        setEditingId(null);
+        await fetchData();
       }
       
       // Reset the ENTIRE form so it's clean for the next entry
@@ -299,6 +318,7 @@ export function PlanFormacion() {
     // Avoid blocking confirm on the iframe
     try {
       await deleteDoc(doc(db, 'pfi_metas', id));
+      await fetchData();
       showMessage('Meta eliminada correctamente.', 'success');
     } catch (error: any) {
       console.error("Error deleting doc:", error);
@@ -591,25 +611,37 @@ export function PlanFormacion() {
       {loading && <InstitutionalLoading message="Auditando Plan de Formación..." />}
 
       <div className="executive-card p-10">
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-8 pb-8 border-b border-white/5">
-          <div className="flex items-center gap-6">
-             <div className="bg-amber-600 text-white w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-900/20 border border-amber-400/20">
-                <Target size={28} />
-             </div>
-             <div>
-                <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic">Seguimiento del P.F.I</h2>
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1 italic">Registro y auditoría de metas estratégicas institucionales</p>
-             </div>
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-8 pb-8 border-b border-white/5">
+            <div className="flex items-center gap-6">
+              <div className="bg-amber-600 text-white w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-900/20 border border-amber-400/20">
+                  <Target size={28} />
+              </div>
+              <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter italic">Seguimiento del P.F.I</h2>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1 italic">Registro y auditoría de metas estratégicas institucionales</p>
+              </div>
+            </div>
+            
+            <div className="flex flex-wrap gap-4">
+              <button 
+                onClick={fetchData}
+                disabled={loading}
+                className="flex items-center justify-center gap-3 bg-white/5 hover:bg-white/10 text-white px-8 py-4 rounded-2xl transition-all font-black text-[11px] tracking-[0.3em] uppercase border border-white/10 active:scale-95 disabled:opacity-50"
+                title="Actualizar Datos"
+              >
+                <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+                Actualizar
+              </button>
+
+              <button 
+                onClick={exportPDF}
+                className="flex items-center justify-center gap-3 bg-[#0A1128] hover:bg-[#0E1B3D] text-white px-10 py-4 rounded-2xl transition-all shadow-xl font-black text-[11px] tracking-[0.3em] uppercase border border-blue-500/20 shadow-blue-900/10 hover:-translate-y-1"
+              >
+                <FileOutput size={20} />
+                Generar Informe Ejecutivo
+              </button>
+            </div>
           </div>
-          
-          <button 
-            onClick={exportPDF}
-            className="flex items-center justify-center gap-3 bg-[#0A1128] hover:bg-[#0E1B3D] text-white px-10 py-4 rounded-2xl transition-all shadow-xl font-black text-[11px] tracking-[0.3em] uppercase border border-blue-500/20 shadow-blue-900/10 hover:-translate-y-1"
-          >
-            <FileOutput size={20} />
-            Generar Informe Ejecutivo
-          </button>
-        </div>
 
         <form onSubmit={handleSubmit} className="space-y-10">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-10 bg-black/20 rounded-[2.5rem] border border-white/5 relative group">

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { ProyectoPedagogico, ActividadCronograma, EstudianteParticipante } from '../lib/types';
 import { GRADOS, DOCENTES } from '../lib/constants';
 import { useCustomLists } from '../hooks/useCustomLists';
-import { Save, Plus, Trash2, Download, BookOpen, Edit, Users, Calendar, Clock, Link2, Eye, FileText, ChevronDown, ChevronUp, FileOutput, Loader2 } from 'lucide-react';
+import { Save, Plus, Trash2, Download, BookOpen, Edit, Users, Calendar, Clock, Link2, Eye, FileText, ChevronDown, ChevronUp, FileOutput, Loader2, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { LOGO_BASE64 } from '../lib/logo';
@@ -15,6 +15,7 @@ import { useNotification } from '../context/NotificationContext';
 import { PageHeader } from '../components/PageHeader';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { MessageModal } from '../components/MessageModal';
+import { isValidUrl } from '../lib/urlUtils';
 
 const INITIAL_ESTRATEGIAS = [
   'Centros de interés',
@@ -94,21 +95,22 @@ export function ProyectosPedagogicos() {
     localStorage.setItem('proyectos_form_data', JSON.stringify(formData));
   }, [formData]);
 
-  useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'proyectos_pedagogicos'), (snapshot) => {
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const q = query(collection(db, 'proyectos_pedagogicos'), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProyectoPedagogico));
-      const sorted = data.sort((a, b) => {
-        const timeA = a.createdAt?.seconds || 0;
-        const timeB = b.createdAt?.seconds || 0;
-        return timeB - timeA;
-      });
-      setProyectos(sorted);
-      setLoading(false);
-    }, (error) => {
+      setProyectos(data);
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.LIST, 'proyectos_pedagogicos');
+    } finally {
       setLoading(false);
-    });
-    return () => unsubscribe();
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const handleEditProyecto = (proyecto: ProyectoPedagogico) => {
@@ -159,6 +161,7 @@ export function ProyectosPedagogicos() {
     setOnConfirm(() => async () => {
       try {
         await deleteDoc(doc(db, 'proyectos_pedagogicos', proyecto.id!));
+        await fetchData();
         notify.success('Estrategia eliminada.');
       } catch (error: any) {
         handleFirestoreError(error, OperationType.DELETE, `proyectos_pedagogicos/${proyecto.id}`);
@@ -219,6 +222,14 @@ export function ProyectosPedagogicos() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser || isSaving) return;
+
+    if (formData.tieneDocumentoSoporte === 'Sí' && formData.documentoSoporte) {
+      if (!isValidUrl(formData.documentoSoporte)) {
+        notify.error("EL ENLACE DE SOPORTE NO ES VÁLIDO. POR FAVOR PEGUE UNA URL REAL.");
+        return;
+      }
+    }
+
     setIsSaving(true);
     try {
       const data = {
@@ -227,6 +238,7 @@ export function ProyectosPedagogicos() {
       };
       if (editingId) {
         await updateDoc(doc(db, 'proyectos_pedagogicos', editingId), data);
+        await fetchData();
         notify.success('ESTRATEGIA ACTUALIZADA CORRECTAMENTE.');
         setEditingId(null);
       } else {
@@ -236,6 +248,7 @@ export function ProyectosPedagogicos() {
           authorEmail: auth.currentUser.email || '',
           createdAt: serverTimestamp()
         });
+        await fetchData();
         notify.success('ESTRATEGIA REGISTRADA EN EL SISTEMA.');
       }
       localStorage.removeItem('proyectos_form_data');
@@ -771,9 +784,19 @@ export function ProyectosPedagogicos() {
 
       {/* Listado Consolidado */}
       <div className="mt-12 space-y-8">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-2xl font-black text-white uppercase tracking-widest italic">Análisis Consolidado de Estrategias F.I.</h2>
-          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest border-l-4 border-blue-600 pl-4">Supervisión Institucional de Programas de Formación Integral</p>
+        <div className="flex flex-col md:flex-row gap-6 justify-between items-start md:items-center px-1">
+          <div className="flex flex-col gap-2">
+            <h2 className="text-2xl font-black text-white uppercase tracking-widest italic">Análisis Consolidado de Estrategias F.I.</h2>
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest border-l-4 border-blue-600 pl-4">Supervisión Institucional de Programas de Formación Integral</p>
+          </div>
+          <button 
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center justify-center gap-3 bg-white/5 hover:bg-white/10 text-white px-8 py-4 rounded-2xl transition-all font-black text-[11px] tracking-[0.3em] uppercase border border-white/10 active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+            Actualizar Registro
+          </button>
         </div>
 
         <div className="grid grid-cols-1 gap-6">

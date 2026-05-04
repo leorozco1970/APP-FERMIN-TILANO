@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, onSnapshot, setDoc, doc, addDoc, deleteDoc, serverTimestamp, getDoc, updateDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, setDoc, doc, addDoc, deleteDoc, serverTimestamp, getDoc, updateDoc, query, where, getDocs } from 'firebase/firestore';
 import { GRADOS, DOCENTES } from '../lib/constants';
 import { useCustomLists } from '../hooks/useCustomLists';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
@@ -88,88 +88,52 @@ export function Matriculas({ initialSubTab = 'directorio' }: { initialSubTab?: '
   const [promptValue, setPromptValue] = useState('');
   const [promptAction, setPromptAction] = useState<((val: string) => void) | null>(null);
 
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [snapMatriculas, snapRetirados, snapInclusion] = await Promise.all([
+        getDocs(collection(db, 'matriculas')),
+        getDocs(collection(db, 'retirados')),
+        getDocs(collection(db, 'estudiantes_inclusion'))
+      ]);
+
+      const matriculasData: Record<string, number> = {};
+      snapMatriculas.forEach((doc) => {
+        matriculasData[doc.id] = doc.data().totalEstudiantes || 0;
+      });
+      setMatriculas(matriculasData);
+
+      setRetirados(snapRetirados.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setEstudiantesInclusion(snapInclusion.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.LIST, 'matriculas_init_data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchEstudiantes = async () => {
+    if (activeTab !== 'directorio') return;
+    setLoadingList(true);
+    try {
+      const q = query(collection(db, 'estudiantes'), where('grado', '==', selectedGradoList));
+      const snapshot = await getDocs(q);
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setEstudiantes(list.sort((a: any, b: any) => a.nombre.localeCompare(b.nombre)));
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.GET, 'estudiantes');
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
   useEffect(() => {
-    let matriculasLoaded = false;
-    let retiradosLoaded = false;
-    let inclusionLoaded = false;
-
-    const checkLoading = () => {
-      if (matriculasLoaded && retiradosLoaded && inclusionLoaded) {
-        setLoading(false);
-      }
-    };
-
-    const unsubMatriculas = onSnapshot(collection(db, 'matriculas'), 
-      (snapshot) => {
-        const data: Record<string, number> = {};
-        snapshot.forEach((doc) => {
-          data[doc.id] = doc.data().totalEstudiantes || 0;
-        });
-        setMatriculas(data);
-        matriculasLoaded = true;
-        checkLoading();
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'matriculas');
-        matriculasLoaded = true;
-        checkLoading();
-      }
-    );
-
-    const unsubRetirados = onSnapshot(collection(db, 'retirados'), 
-      (snapshot) => {
-        const data: any[] = [];
-        snapshot.forEach((doc) => {
-          data.push({ id: doc.id, ...doc.data() });
-        });
-        setRetirados(data);
-        retiradosLoaded = true;
-        checkLoading();
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'retirados');
-        retiradosLoaded = true;
-        checkLoading();
-      }
-    );
-
-    const unsubInclusion = onSnapshot(collection(db, 'estudiantes_inclusion'), 
-      (snapshot) => {
-        const data: any[] = [];
-        snapshot.forEach((doc) => {
-          data.push({ id: doc.id, ...doc.data() });
-        });
-        setEstudiantesInclusion(data);
-        inclusionLoaded = true;
-        checkLoading();
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'estudiantes_inclusion');
-        inclusionLoaded = true;
-        checkLoading();
-      }
-    );
-
-    const timer = setTimeout(() => setLoading(false), 100);
-
-    return () => {
-      unsubMatriculas();
-      unsubRetirados();
-      unsubInclusion();
-      clearTimeout(timer);
-    };
+    fetchData();
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'directorio') {
-      const q = query(collection(db, 'estudiantes'), where('grado', '==', selectedGradoList));
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setEstudiantes(list.sort((a: any, b: any) => a.nombre.localeCompare(b.nombre)));
-        setLoadingList(false);
-      }, (error: any) => {
-        handleFirestoreError(error, OperationType.GET, 'estudiantes');
-        setLoadingList(false);
-      });
-      return () => unsubscribe();
-    }
+    fetchEstudiantes();
   }, [selectedGradoList, activeTab]);
 
   const handleBulkUpload = async () => {
@@ -214,6 +178,8 @@ export function Matriculas({ initialSubTab = 'directorio' }: { initialSubTab?: '
         updatedAt: serverTimestamp()
       }, { merge: true });
 
+      await fetchEstudiantes();
+      await fetchData();
       setBulkInput('');
       notify.success(`${namesAndDocs.length} ESTUDIANTES CARGADOS CON ÉXITO.`);
     } catch (error: any) {
@@ -230,6 +196,7 @@ export function Matriculas({ initialSubTab = 'directorio' }: { initialSubTab?: '
         nombre: editName.toUpperCase().trim(),
         documento: editDocumento.trim()
       });
+      await fetchEstudiantes();
       setEditingId(null);
       notify.success('ESTUDIANTE ACTUALIZADO.');
     } catch (error: any) {
@@ -257,6 +224,8 @@ export function Matriculas({ initialSubTab = 'directorio' }: { initialSubTab?: '
         updatedAt: serverTimestamp()
       });
 
+      await fetchEstudiantes();
+      await fetchData();
       notify.info(`${s.nombre} ELIMINADO Y TRASLADADO A RETIROS.`);
     } catch (e: any) {
       notify.error('Error al eliminar.');
@@ -375,6 +344,9 @@ export function Matriculas({ initialSubTab = 'directorio' }: { initialSubTab?: '
         } catch (err) {
           console.warn("Could not auto-remove from students list:", err);
         }
+
+        await fetchData();
+        if (activeTab === 'directorio') await fetchEstudiantes();
       }
       
       setRetiredForm({
@@ -416,6 +388,7 @@ export function Matriculas({ initialSubTab = 'directorio' }: { initialSubTab?: '
   const executeDeleteRetired = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'retirados', id));
+      await fetchData();
       notify.success("REGISTRO ELIMINADO CORRECTAMENTE.");
     } catch (e: any) {
       console.error("Error al eliminar retiro:", e);
@@ -435,6 +408,7 @@ export function Matriculas({ initialSubTab = 'directorio' }: { initialSubTab?: '
         totalEstudiantes: valor,
         updatedAt: serverTimestamp()
       });
+      await fetchData();
       notify.success(`Matrícula de ${grado} actualizada correctamente.`);
     } catch (error: any) {
       handleFirestoreError(error, OperationType.UPDATE, `matriculas/${grado}`);

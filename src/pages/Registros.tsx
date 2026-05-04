@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, query, onSnapshot, deleteDoc, doc, orderBy, getDocs } from 'firebase/firestore';
+import { collection, query, deleteDoc, doc, orderBy, getDocs } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { Reporte } from '../lib/types';
 import { PERIODOS, GRADOS, DOCENTES } from '../lib/constants';
 import { LOGO_BASE64 } from '../lib/logo';
-import { Search, Download, Trash2, ChevronDown, ChevronUp, AlertCircle, FileOutput, Edit2, AlertTriangle, TrendingDown, AlertOctagon, Presentation, BrainCircuit } from 'lucide-react';
+import { Search, Download, Trash2, ChevronDown, ChevronUp, AlertCircle, FileOutput, Edit2, AlertTriangle, TrendingDown, AlertOctagon, Presentation, BrainCircuit, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { drawExecutiveHeader, drawExecutiveFooter, drawWatermark, PDF_COLORS, PDF_MARGIN, INTRO_TEXTS, getPerfectTableStyles } from '../lib/pdfUtils';
@@ -50,59 +50,46 @@ export function Registros() {
   const [modalType, setModalType] = useState<'success' | 'error' | 'warning'>('success');
   const [modalMessage, setModalMessage] = useState('');
 
-  useEffect(() => {
-    let unsubscribeReportes: () => void = () => {};
-    let unsubscribeMatriculas: () => void = () => {};
-
-    const setupListeners = () => {
+  const fetchData = async () => {
+    setLoading(true);
+    try {
       const q = query(collection(db, 'reportes'), orderBy('createdAt', 'desc'));
-      
-      unsubscribeReportes = onSnapshot(q, (snapshot) => {
-        const data: Reporte[] = [];
-        snapshot.forEach((doc) => {
-          data.push({ id: doc.id, ...doc.data() } as Reporte);
-        });
-        setReportes(data);
-        setLoading(false);
-      }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'reportes');
-        setLoading(false);
-      });
+      const [snapReportes, snapMatriculas] = await Promise.all([
+        getDocs(q),
+        getDocs(collection(db, 'matriculas'))
+      ]);
 
-      unsubscribeMatriculas = onSnapshot(collection(db, 'matriculas'), (snapshot) => {
-        const data: Record<string, number> = {};
-        snapshot.forEach(doc => {
-          data[doc.id] = doc.data().totalEstudiantes || 0;
-        });
-        setMatriculas(data);
-      }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'matriculas');
-      });
-    };
+      const data: Reporte[] = snapReportes.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reporte));
+      setReportes(data);
 
+      const matriculasData: Record<string, number> = {};
+      snapMatriculas.docs.forEach(doc => {
+        matriculasData[doc.id] = doc.data().totalEstudiantes || 0;
+      });
+      setMatriculas(matriculasData);
+
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.LIST, 'registros_data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     if (auth.currentUser) {
-      setupListeners();
+      fetchData();
     } else {
       const authUnsub = auth.onAuthStateChanged((user) => {
         if (user) {
-          setupListeners();
+          fetchData();
           authUnsub();
         } else {
           setLoading(false);
           authUnsub();
         }
       });
-      return () => {
-        authUnsub();
-        unsubscribeReportes();
-        unsubscribeMatriculas();
-      };
+      return () => authUnsub();
     }
-
-    return () => {
-      unsubscribeReportes();
-      unsubscribeMatriculas();
-    };
   }, []);
 
   const [passwordModalConfig, setPasswordModalConfig] = useState<{
@@ -133,6 +120,7 @@ export function Registros() {
       try {
         setLoading(true);
         await deleteDoc(doc(db, 'reportes', id));
+        await fetchData();
         setModalType('success');
         setModalMessage('REPORTE ELIMINADO CORRECTAMENTE.');
         setIsMessageModalOpen(true);
@@ -160,6 +148,7 @@ export function Registros() {
         const snapshot = await getDocs(collection(db, 'reportes'));
         const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
         await Promise.all(deletePromises);
+        await fetchData();
         setModalType('success');
         setModalMessage('TODOS LOS REPORTES HAN SIDO ELIMINADOS.');
         setIsMessageModalOpen(true);
@@ -573,6 +562,15 @@ export function Registros() {
         imageUrl="https://images.unsplash.com/photo-1531403009284-440f080d1e12?auto=format&fit=crop&q=80&w=800"
       >
         <div className="flex items-center gap-3 mt-6">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white font-bold py-2.5 px-6 rounded-xl transition-all border border-white/10 disabled:opacity-50 uppercase text-[11px] tracking-widest"
+            title="Actualizar Datos"
+          >
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            Actualizar
+          </button>
           <button
             onClick={exportToPDF}
             disabled={filteredReportes.length === 0}

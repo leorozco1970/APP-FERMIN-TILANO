@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, addDoc, query, orderBy, deleteDoc, doc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, query, orderBy, deleteDoc, doc, updateDoc, serverTimestamp, getDocs } from 'firebase/firestore';
 import { ArticulacionCurricularData, ProyectoPedagogico } from '../lib/types';
 import { useCustomLists } from '../hooks/useCustomLists';
-import { Save, Trash2, Download, Edit, FileText, Link2, Eye, Sparkles, Layers, Loader2, CheckCircle2 } from 'lucide-react';
+import { Save, Trash2, Download, Edit, FileText, Link2, Eye, Sparkles, Layers, Loader2, CheckCircle2, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { PasswordModal } from '../components/PasswordModal';
@@ -12,6 +12,7 @@ import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { useNotification } from '../context/NotificationContext';
 import { PageHeader } from '../components/PageHeader';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { isValidUrl } from '../lib/urlUtils';
 
 const ESTADOS = ['En Diseño', 'En Implementación', 'En Evaluación Formativa'];
 const ARMONIZACIONES = [
@@ -76,25 +77,44 @@ export function ArticulacionCurricular() {
   const [confirmMessage, setConfirmMessage] = useState('');
   const [onConfirm, setOnConfirm] = useState<(() => void) | null>(null);
 
+  // Draft Persistence
   useEffect(() => {
-    const unsubProy = onSnapshot(collection(db, 'proyectos_pedagogicos'), (snap) => {
-      setProyectos(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProyectoPedagogico)));
-    });
-    const unsubArt = onSnapshot(collection(db, 'articulacion_curricular'), (snap) => {
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as ArticulacionCurricularData));
-      // Sort in memory to avoid Firestore index requirements and ensure visibility of all records
+    const saved = localStorage.getItem('articulacion_draft');
+    if (saved) setFormData(JSON.parse(saved));
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('articulacion_draft', JSON.stringify(formData));
+  }, [formData]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      // Fetch Proyectos
+      const qProy = query(collection(db, 'proyectos_pedagogicos'), orderBy('createdAt', 'desc'));
+      const snapProy = await getDocs(qProy);
+      setProyectos(snapProy.docs.map(d => ({ id: d.id, ...d.data() } as ProyectoPedagogico)));
+
+      // Fetch Articulaciones
+      const qArt = query(collection(db, 'articulacion_curricular'));
+      const snapArt = await getDocs(qArt);
+      const data = snapArt.docs.map(d => ({ id: d.id, ...d.data() } as ArticulacionCurricularData));
+      
       const sorted = data.sort((a, b) => {
         const timeA = a.createdAt?.seconds || 0;
         const timeB = b.createdAt?.seconds || 0;
         return timeB - timeA;
       });
       setArticulaciones(sorted);
-      setLoading(false);
-    }, (error) => {
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.LIST, 'articulacion_curricular');
+    } finally {
       setLoading(false);
-    });
-    return () => { unsubProy(); unsubArt(); };
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const handleSelectProyecto = (id: string) => {
@@ -139,6 +159,7 @@ export function ArticulacionCurricular() {
     setOnConfirm(() => async () => {
       try {
         await deleteDoc(doc(db, 'articulacion_curricular', art.id!));
+        await fetchData();
         notify.success('Articulación eliminada.');
       } catch (error: any) {
         handleFirestoreError(error, OperationType.DELETE, `articulacion_curricular/${art.id}`);
@@ -216,6 +237,7 @@ export function ArticulacionCurricular() {
 
       if (editingId) {
         await updateDoc(doc(db, 'articulacion_curricular', editingId), cleanData);
+        await fetchData();
         notify.success('¡ACTUALIZACIÓN EXITOSA! Los cambios se han sincronizado.');
         setEditingId(null);
       } else {
@@ -225,6 +247,7 @@ export function ArticulacionCurricular() {
           authorEmail: auth.currentUser.email || '',
           createdAt: serverTimestamp()
         });
+        await fetchData();
         notify.success('¡GUARDADO EXITOSO! La articulación ya está en el consolidado institucional.');
       }
       
@@ -855,19 +878,29 @@ export function ArticulacionCurricular() {
       </div>
 
       <div className="mt-16 space-y-10">
-         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 px-2">
+         <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-6 px-2">
             <div className="flex flex-col gap-2">
               <h2 className="text-2xl font-black text-white uppercase tracking-widest italic flex items-center gap-4">
                  <Layers className="text-blue-400" size={32} /> ARTICULACIÓN Y ARMONIZACIÓN CURRICULAR
               </h2>
               <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest border-l-4 border-emerald-600 pl-4">Consolidado histórico de armonización institucional</p>
             </div>
-            <button 
-              onClick={exportAllPDF}
-              className="flex items-center gap-3 px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-3xl text-[11px] font-black uppercase tracking-[0.2em] transition-all shadow-xl shadow-emerald-950/40 border-b-4 border-emerald-800"
-            >
-              <Download size={20} /> Exportar Consolidado (TODAS)
-            </button>
+            <div className="flex flex-wrap gap-4">
+              <button 
+                onClick={fetchData}
+                disabled={loading}
+                className="flex items-center justify-center gap-3 bg-white/5 hover:bg-white/10 text-white px-8 py-4 rounded-2xl transition-all font-black text-[11px] tracking-[0.3em] uppercase border border-white/10 active:scale-95 disabled:opacity-50"
+              >
+                <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+                Actualizar
+              </button>
+              <button 
+                onClick={exportAllPDF}
+                className="flex items-center gap-3 px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-3xl text-[11px] font-black uppercase tracking-[0.2em] transition-all shadow-xl shadow-emerald-950/40 border-b-4 border-emerald-800"
+              >
+                <Download size={20} /> Exportar Consolidado (TODAS)
+              </button>
+            </div>
          </div>
          
          <div className="space-y-4 overflow-hidden rounded-[2.5rem]">

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth, storage } from '../lib/firebase';
-import { collection, addDoc, query, orderBy, onSnapshot, deleteDoc, doc, updateDoc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, query, orderBy, getDocs, deleteDoc, doc, updateDoc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { PlanFormacionIntegralData, PFINecesidadRegistro, PFIActividadCronograma } from '../lib/types';
 import { Save, FileOutput, Trash2, PlusCircle, Calendar, ClipboardList, BookOpen, Target, Sparkles, Layout, Building2, Eye, Download, FileSpreadsheet, AlertCircle, X, CheckCircle2, Upload, ExternalLink, RefreshCw } from 'lucide-react';
@@ -13,6 +13,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { useNotification } from '../context/NotificationContext';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { drawExecutiveHeader, drawExecutiveFooter, drawWatermark, PDF_COLORS, getPerfectTableStyles, PDF_MARGIN } from '../lib/pdfUtils';
+import { isValidUrl } from '../lib/urlUtils';
 
 export function ConstruccionPFI() {
   const { notify } = useNotification();
@@ -61,19 +62,42 @@ export function ConstruccionPFI() {
     fecha: ''
   });
 
+  // LocalStorage Persistence
   useEffect(() => {
-    const q = query(collection(db, 'construccion_pfi'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const savedForm = localStorage.getItem('pfi_form_draft');
+    const savedUrl = localStorage.getItem('pfi_url_draft');
+    if (savedForm) setFormData(JSON.parse(savedForm));
+    if (savedUrl) {
+      setTimeout(() => {
+        const input = document.getElementById('globalUrlInput') as HTMLInputElement;
+        if (input) input.value = savedUrl;
+      }, 0);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('pfi_form_draft', JSON.stringify(formData));
+  }, [formData]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const q = query(collection(db, 'construccion_pfi'), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
       const data: PlanFormacionIntegralData[] = [];
       snapshot.forEach((doc) => {
         data.push({ id: doc.id, ...doc.data() } as PlanFormacionIntegralData);
       });
       setPlans(data);
-      setLoading(false);
-    }, (error) => {
-      setLoading(false);
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.LIST, 'construccion_pfi');
-    });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
 
     // Fetch the global PFI document state
     const fetchGlobalDoc = async () => {
@@ -90,8 +114,6 @@ export function ConstruccionPFI() {
       }
     };
     fetchGlobalDoc();
-
-    return () => unsubscribe();
   }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -252,12 +274,14 @@ export function ConstruccionPFI() {
 
       if (editingPlanId) {
         await updateDoc(doc(db, 'construccion_pfi', editingPlanId), dataToSave);
+        await fetchData();
         notify.success('Plan de Formación Integral actualizado.');
       } else {
         await addDoc(collection(db, 'construccion_pfi'), {
           ...dataToSave,
           createdAt: serverTimestamp()
         });
+        await fetchData();
         notify.success('Plan de Formación Integral registrado exitosamente.');
       }
 
@@ -272,6 +296,7 @@ export function ConstruccionPFI() {
         registrosNecesidades: []
       });
       setEditingPlanId(null);
+      localStorage.removeItem('pfi_form_draft');
     } catch (error: any) {
       handleFirestoreError(error, editingPlanId ? OperationType.UPDATE : OperationType.CREATE, 'construccion_pfi');
     } finally {
@@ -290,6 +315,7 @@ export function ConstruccionPFI() {
     setOnConfirm(() => async () => {
       try {
         await deleteDoc(doc(db, 'construccion_pfi', id));
+        await fetchData();
         notify.success('Registro de P.F.I eliminado.');
       } catch (error: any) {
         handleFirestoreError(error, OperationType.DELETE, `construccion_pfi/${id}`);
@@ -496,16 +522,19 @@ export function ConstruccionPFI() {
                   type="button"
                   onClick={async () => {
                      const input = document.getElementById('globalUrlInput') as HTMLInputElement;
-                     if (input && input.value.trim().startsWith('http')) {
+                     const url = input?.value.trim() || '';
+                     
+                     if (url && isValidUrl(url)) {
+                        localStorage.setItem('pfi_url_draft', url);
                         setUploadingGlobal(true);
                         try {
                            const globalDocRef = doc(db, 'pfi_settings', 'main_document');
                            await setDoc(globalDocRef, {
-                                fileUrl: input.value.trim(),
+                                fileUrl: url,
                                 fileName: 'DOCUMENTO PFI 2025',
                                 updatedAt: serverTimestamp()
                            }, { merge: true });
-                           setGlobalFileUrl(input.value.trim());
+                           setGlobalFileUrl(url);
                            setGlobalFileName('DOCUMENTO PFI 2025');
                            notify.success('URL del PFI 2025 guardada exitosamente.');
                         } catch (e: any) {
@@ -513,7 +542,7 @@ export function ConstruccionPFI() {
                         }
                         setUploadingGlobal(false);
                      } else {
-                        notify.error('SISTEMA: Ingrese una URL válida');
+                        notify.error('ERROR: Pegue un enlace válido (inicie con http:// o https://)');
                      }
                   }}
                   className="px-10 h-14 bg-blue-600 hover:bg-blue-700 text-white font-black text-[11px] tracking-[0.2em] rounded-2xl transition-all shadow-xl shadow-blue-900/20 uppercase active:scale-95"
@@ -777,9 +806,19 @@ export function ConstruccionPFI() {
       </div>
 
       <div className="space-y-8">
-         <div className="flex items-center gap-6 px-1">
-            <div className="w-2 h-10 bg-blue-600 rounded-full shadow-[0_0_20px_rgba(37,99,235,0.4)]" />
-            <h3 className="text-4xl font-black text-white uppercase tracking-tighter italic">Historial de Planes (P.F.I)</h3>
+         <div className="flex items-center justify-between mb-8 gap-6 px-1 flex-wrap">
+            <div className="flex items-center gap-6">
+               <div className="w-2 h-10 bg-blue-600 rounded-full shadow-[0_0_20px_rgba(37,99,235,0.4)]" />
+               <h3 className="text-4xl font-black text-white uppercase tracking-tighter italic">Historial de Planes (P.F.I)</h3>
+            </div>
+            <button 
+              onClick={fetchData}
+              disabled={loading}
+              className="flex items-center justify-center gap-3 bg-white/5 hover:bg-white/10 text-white px-8 py-4 rounded-2xl transition-all font-black text-[11px] tracking-[0.3em] uppercase border border-white/10 active:scale-95 disabled:opacity-50"
+            >
+              <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+              Actualizar Historial
+            </button>
          </div>
 
          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">

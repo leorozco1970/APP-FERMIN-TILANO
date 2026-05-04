@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, query, onSnapshot, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { Reporte } from '../lib/types';
 import { PERIODOS, DOCENTES } from '../lib/constants';
-import { Search, AlertTriangle, Download, Trash2, Edit } from 'lucide-react';
+import { Search, AlertTriangle, Download, Trash2, Edit, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { drawExecutiveHeader, drawExecutiveFooter, drawWatermark, PDF_COLORS, PDF_MARGIN, INTRO_TEXTS } from '../lib/pdfUtils';
@@ -44,24 +44,26 @@ export function RegistroEstudiante() {
   const [modalType, setModalType] = useState<'success' | 'error' | 'warning'>('success');
   const [modalMessage, setModalMessage] = useState('');
 
-  useEffect(() => {
+  const fetchData = async () => {
     if (!auth.currentUser) return;
-
-    const q = query(collection(db, 'reportes'));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data: Reporte[] = [];
-      snapshot.forEach((doc) => {
-        data.push({ id: doc.id, ...doc.data() } as Reporte);
-      });
+    setLoading(true);
+    try {
+      const q = query(collection(db, 'reportes'));
+      const snapshot = await getDocs(q);
+      const data: Reporte[] = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data()
+      } as Reporte));
       setReportes(data);
-      setLoading(false);
-    }, (error) => {
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.LIST, 'reportes');
+    } finally {
       setLoading(false);
-    });
+    }
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const gradosUnicos = useMemo(() => {
@@ -187,6 +189,7 @@ export function RegistroEstudiante() {
           const snapshot = await getDocs(collection(db, 'reportes'));
           const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
           await Promise.all(deletePromises);
+          await fetchData();
           setLoading(false);
         } catch (err) {
           handleFirestoreError(err, OperationType.DELETE, 'reportes');
@@ -226,6 +229,7 @@ export function RegistroEstudiante() {
             }
           });
           await batch.commit();
+          await fetchData();
           setLoading(false);
         } catch (e) {
           handleFirestoreError(e, OperationType.UPDATE, 'reportes');
@@ -262,6 +266,7 @@ export function RegistroEstudiante() {
           }
         });
         await batch.commit();
+        await fetchData();
         setLoading(false);
         setModalType('success');
         setModalMessage('ESTUDIANTE ELIMINADO CORRECTAMENTE DEL SISTEMA.');
@@ -706,7 +711,16 @@ export function RegistroEstudiante() {
         description="Consulte el listado consolidado de estudiantes con áreas reprobadas. Filtre por periodo o grado, y exporte los resultados en formato PDF para las comisiones de evaluación."
         imageUrl="https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?auto=format&fit=crop&q=80&w=800"
       >
-          <div className="flex flex-wrap items-center gap-3 mt-4">
+        <div className="flex items-center gap-3 mt-4">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white font-black py-2.5 px-6 rounded-xl transition-all border border-white/10 disabled:opacity-50 uppercase text-[11px] tracking-widest"
+            title="Actualizar Datos"
+          >
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            Actualizar
+          </button>
           <button
             onClick={exportToPDF}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-black py-2.5 px-6 rounded-2xl transition-all shadow-xl shadow-blue-900/20 active:scale-95 uppercase text-[10px] tracking-widest"

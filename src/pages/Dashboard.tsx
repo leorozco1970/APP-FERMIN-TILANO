@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, query, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { Reporte } from '../lib/types';
 import { PERIODOS } from '../lib/constants';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line, LabelList, AreaChart, Area } from 'recharts';
-import { Users, AlertTriangle, TrendingDown, BookOpen, Activity, CheckCircle2, Download, X, BrainCircuit } from 'lucide-react';
+import { Users, AlertTriangle, TrendingDown, BookOpen, RefreshCw, CheckCircle2, Download, X, BrainCircuit } from 'lucide-react';
 import html2canvas from 'html2canvas';
 
 import { PageHeader } from '../components/PageHeader';
@@ -33,85 +33,56 @@ export function Dashboard() {
     students: { nombre: string; nota: string; estado: string }[];
   } | null>(null);
 
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      // Parallel fetch for all collections
+      const [snapReportes, snapMatriculas, snapInclusion, snapRetirados] = await Promise.all([
+        getDocs(query(collection(db, 'reportes'))),
+        getDocs(collection(db, 'matriculas')),
+        getDocs(collection(db, 'estudiantes_inclusion')),
+        getDocs(collection(db, 'retirados'))
+      ]);
+
+      // Process Reportes
+      const reportsData: Reporte[] = snapReportes.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reporte));
+      setReportes(reportsData);
+
+      // Process Matriculas
+      const matriculasData: Record<string, number> = {};
+      snapMatriculas.forEach(doc => {
+        matriculasData[doc.id] = doc.data().totalEstudiantes || 0;
+      });
+      setMatriculasGlobales(matriculasData);
+
+      // Process Inclusion
+      setEstudiantesInclusion(snapInclusion.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+
+      // Process Retirados
+      setRetirados(snapRetirados.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.LIST, 'dashboard_data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    // Wait for auth to be ready if it's currently null
-    let unsubscribeReportes: () => void = () => {};
-    let unsubscribeMatriculas: () => void = () => {};
-    let unsubscribeApoyo: () => void = () => {};
-    let unsubscribeRetirados: () => void = () => {};
-
-    const setupListeners = () => {
-      // Live reportes
-      const q = query(collection(db, 'reportes'));
-      unsubscribeReportes = onSnapshot(q, (snapshot) => {
-        const data: Reporte[] = [];
-        snapshot.forEach((doc) => {
-          data.push({ id: doc.id, ...doc.data() } as Reporte);
-        });
-        setReportes(data);
-        setLoading(false);
-      }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'reportes');
-        setLoading(false);
-      });
-
-      // Live matriculas
-      unsubscribeMatriculas = onSnapshot(collection(db, 'matriculas'), (snapshot) => {
-        const data: Record<string, number> = {};
-        snapshot.forEach((doc) => {
-          data[doc.id] = doc.data().totalEstudiantes || 0;
-        });
-        setMatriculasGlobales(data);
-      }, (err) => {
-         console.warn("Matriculas sync delayed:", err);
-      });
-
-      // Live Apoyo (Inclusión PIAR)
-      unsubscribeApoyo = onSnapshot(collection(db, 'estudiantes_inclusion'), (snapshot) => {
-        const data: any[] = [];
-        snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-        setEstudiantesInclusion(data);
-      }, (err) => {
-         console.warn("Inclusion sync delayed:", err);
-      });
-
-      // Live Retirados
-      unsubscribeRetirados = onSnapshot(collection(db, 'retirados'), (snapshot) => {
-        const data: any[] = [];
-        snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
-        setRetirados(data);
-      }, (err) => {
-         console.warn("Retirados sync delayed:", err);
-      });
-    };
-
     if (auth.currentUser) {
-      setupListeners();
+      fetchData();
     } else {
       const authUnsub = auth.onAuthStateChanged((user) => {
         if (user) {
-          setupListeners();
+          fetchData();
           authUnsub();
         } else {
           setLoading(false);
           authUnsub();
         }
       });
-      return () => {
-        authUnsub();
-        unsubscribeReportes();
-        unsubscribeMatriculas();
-        unsubscribeApoyo();
-        unsubscribeRetirados();
-      };
+      return () => authUnsub();
     }
-
-    return () => {
-      unsubscribeReportes();
-      unsubscribeMatriculas();
-      unsubscribeApoyo();
-      unsubscribeRetirados();
-    };
   }, []);
 
   // Compute unique filter options
@@ -528,6 +499,16 @@ export function Dashboard() {
                 .filter(a => !a.toUpperCase().includes('TODAS LAS'))
                 .map(a => <option key={a} value={a} className="bg-[#1A1A1A]">{a.toUpperCase()}</option>)}
             </select>
+            <div className="w-px h-6 bg-white/10 self-center"></div>
+            <button 
+              onClick={fetchData}
+              disabled={loading}
+              className="flex items-center gap-2 px-6 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all font-bold text-sm disabled:opacity-50"
+              title="Actualizar todos los datos"
+            >
+              <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline">ACTUALIZAR</span>
+            </button>
           </div>
         </div>
       </PageHeader>
@@ -600,7 +581,7 @@ export function Dashboard() {
 
           <div className="executive-card p-8 flex flex-col justify-between group overflow-hidden relative border-white/5 sm:col-span-2">
             <div className="absolute top-0 right-0 p-6 opacity-[0.03] group-hover:scale-125 transition-transform duration-500 text-white">
-               <Activity size={80} />
+               <RefreshCw size={80} />
             </div>
             <div className="flex items-center gap-6">
               <div className="w-12 h-12 rounded-2xl bg-emerald-600/10 flex items-center justify-center text-emerald-400 border border-emerald-500/20">

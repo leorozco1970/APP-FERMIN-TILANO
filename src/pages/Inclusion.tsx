@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, onSnapshot, setDoc, doc, addDoc, deleteDoc, serverTimestamp, getDoc } from 'firebase/firestore';
+import { collection, getDocs, setDoc, doc, addDoc, deleteDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { GRADOS, DOCENTES, AREAS } from '../lib/constants';
 import { useCustomLists } from '../hooks/useCustomLists';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
@@ -175,21 +175,34 @@ export function Inclusion() {
     ajustesEntorno: []
   });
 
+  // Persistence Logic
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'estudiantes_inclusion'), 
-      (snapshot) => {
-        const data: EstudianteInclusion[] = [];
-        snapshot.forEach((doc) => {
-          data.push({ id: doc.id, ...doc.data() } as EstudianteInclusion);
-        });
-        setEstudiantes(data);
-        setLoading(false);
-      }, (error) => {
-        setLoading(false);
-        handleFirestoreError(error, OperationType.LIST, 'estudiantes_inclusion');
-      }
-    );
-    return () => unsub();
+    const saved = localStorage.getItem('inclusion_draft');
+    if (saved) setForm(JSON.parse(saved));
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('inclusion_draft', JSON.stringify(form));
+  }, [form]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const snapshot = await getDocs(collection(db, 'estudiantes_inclusion'));
+      const data: EstudianteInclusion[] = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data()
+      } as EstudianteInclusion));
+      setEstudiantes(data);
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.LIST, 'estudiantes_inclusion');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -216,6 +229,7 @@ export function Inclusion() {
         });
         notify.success("ESTUDIANTE REGISTRADO EN EL SISTEMA DE INCLUSIÓN.");
       }
+      await fetchData();
       resetForm();
     } catch (e: any) {
       handleFirestoreError(e, editingId ? OperationType.UPDATE : OperationType.CREATE, 'estudiantes_inclusion');
@@ -255,6 +269,7 @@ export function Inclusion() {
     setConfirmAction(() => async () => {
       try {
         await deleteDoc(doc(db, 'estudiantes_inclusion', id));
+        await fetchData();
         notify.success("REGISTRO ELIMINADO.");
       } catch (e) {
         notify.error("Error al eliminar.");
@@ -412,7 +427,19 @@ export function Inclusion() {
       <PageHeader 
         title="ATENCIÓN INTEGRAL A ESTUDIANTES (INCLUSIÓN)" 
         description="“Aquí no registramos dificultades… documentamos cómo las transformamos en oportunidades de aprendizaje.”"
-      />
+      >
+        <div className="flex items-center gap-3 mt-6">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white font-bold py-2.5 px-6 rounded-xl transition-all border border-white/10 disabled:opacity-50 uppercase text-[11px] tracking-widest"
+            title="Actualizar Datos"
+          >
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            Actualizar
+          </button>
+        </div>
+      </PageHeader>
 
       <div className="space-y-8 animate-in fade-in duration-700">
         

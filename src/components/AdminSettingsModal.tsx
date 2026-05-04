@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
-import { doc, setDoc, getDoc, collection, query, orderBy, limit, getDocs, writeBatch, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, query, orderBy, limit, getDocs, writeBatch } from 'firebase/firestore';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { formatName } from '../lib/formatter';
 import { useCustomLists } from '../hooks/useCustomLists';
@@ -34,20 +34,38 @@ export function AdminSettingsModal({ isOpen, onClose }: AdminSettingsModalProps)
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  const fetchHistory = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const q = query(collection(db, 'login_history'), orderBy('timestamp', 'desc'), limit(50));
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setHistory(data);
+      // Cache in localStorage to respect "Costo Cero"
+      localStorage.setItem('admin_login_history_cache', JSON.stringify(data));
+    } catch (err) {
+      console.error(err);
+      setError('ERROR AL CARGAR EL HISTORIAL DE ACCESO.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       if (activeTab === 'pins') loadPins();
       if (activeTab === 'history') {
-        const q = query(collection(db, 'login_history'), orderBy('timestamp', 'desc'), limit(50));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-          setHistory(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-          setLoading(false);
-        }, (err) => {
-          console.error(err);
-          setError('Error al cargar el historial de acceso live.');
-          setLoading(false);
-        });
-        return () => unsubscribe();
+        const cached = localStorage.getItem('admin_login_history_cache');
+        if (cached && history.length === 0) {
+          try {
+            setHistory(JSON.parse(cached));
+          } catch (e) {
+            fetchHistory();
+          }
+        } else {
+          fetchHistory();
+        }
       }
     }
   }, [isOpen, activeTab]);
@@ -56,7 +74,9 @@ export function AdminSettingsModal({ isOpen, onClose }: AdminSettingsModalProps)
     try {
       const snap = await getDoc(doc(db, 'settings', 'docentes_pins'));
       if (snap.exists()) {
-        setTeacherPins(snap.data().pins || {});
+        const pinsData = snap.data().pins || {};
+        setTeacherPins(pinsData);
+        localStorage.setItem('docentes_pins_cache', JSON.stringify(pinsData));
       }
     } catch (e) { console.error(e); }
   };
@@ -66,6 +86,7 @@ export function AdminSettingsModal({ isOpen, onClose }: AdminSettingsModalProps)
     
     try {
       setLoading(true);
+      setError('');
       const q = query(collection(db, 'login_history'));
       const snap = await getDocs(q);
       
@@ -80,11 +101,12 @@ export function AdminSettingsModal({ isOpen, onClose }: AdminSettingsModalProps)
       }
       
       setHistory([]);
+      localStorage.removeItem('admin_login_history_cache');
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (e) {
       console.error(e);
-      setError('Error al eliminar el historial');
+      setError('ERROR AL ELIMINAR EL HISTORIAL.');
     } finally {
       setLoading(false);
     }
@@ -93,11 +115,11 @@ export function AdminSettingsModal({ isOpen, onClose }: AdminSettingsModalProps)
   const handleSubmitMaster = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) {
-      setError('Las contraseñas no coinciden.');
+      setError('LAS CONTRASEÑAS NO COINCIDEN.');
       return;
     }
     if (newPassword.length < 4) {
-      setError('La clave debe tener al menos 4 caracteres.');
+      setError('LA CLAVE DEBE TENER AL MENOS 4 CARACTERES.');
       return;
     }
 
@@ -115,7 +137,7 @@ export function AdminSettingsModal({ isOpen, onClose }: AdminSettingsModalProps)
       }, 2000);
     } catch (err: any) {
       console.error(err);
-      setError('Error al actualizar la contraseña.');
+      setError('ERROR AL ACTUALIZAR LA CONTRASEÑA.');
     } finally {
       setLoading(false);
     }
@@ -125,10 +147,16 @@ export function AdminSettingsModal({ isOpen, onClose }: AdminSettingsModalProps)
     try {
       const newPins = { ...teacherPins, [docente]: val };
       setTeacherPins(newPins);
+      // Actualizamos solo el estado local para fluidez, y persistimos
+      localStorage.setItem('docentes_pins_cache', JSON.stringify(newPins));
+      
+      // Para costo cero, podríamos usar un botón de "Guardar Cambios", 
+      // pero el usuario pidió no cambiar estructura visual.
+      // Escribiremos a Firebase pero con precaución.
       await setDoc(doc(db, 'settings', 'docentes_pins'), { pins: newPins }, { merge: true });
     } catch (e) {
       console.error(e);
-      setError('Error al guardar la clave de acceso del docente');
+      setError('ERROR AL GUARDAR LA CLAVE DE ACCESO DEL DOCENTE.');
     }
   }
 
@@ -164,7 +192,7 @@ export function AdminSettingsModal({ isOpen, onClose }: AdminSettingsModalProps)
           animate={{ opacity: 1, y: 0 }}
           className="mb-6 bg-emerald-500/10 text-emerald-400 p-5 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-emerald-500/20 flex items-center gap-4 shrink-0 italic"
         >
-          <CheckCircle2 size={18} /> Los cambios se guardaron correctamente.
+          <CheckCircle2 size={18} /> LOS CAMBIOS SE GUARDARON CORRECTAMENTE.
         </motion.div>
       )}
       {error && (
@@ -337,9 +365,10 @@ export function AdminSettingsModal({ isOpen, onClose }: AdminSettingsModalProps)
                 </div>
                 <div className="flex gap-3">
                    <button 
-                     onClick={() => {}}
+                     onClick={fetchHistory}
                      disabled={loading}
                      className="p-4 text-blue-400 hover:text-white hover:bg-blue-600/20 bg-blue-500/5 rounded-2xl transition-all border border-blue-500/10 shadow-lg"
+                     title="Actualizar Bitácora"
                    >
                       <RefreshCw size={24} className={loading ? 'animate-spin' : ''} />
                    </button>
@@ -368,7 +397,7 @@ export function AdminSettingsModal({ isOpen, onClose }: AdminSettingsModalProps)
                           <td className="px-8 py-6">
                             <div className="flex items-center gap-5">
                               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg transition-all group-hover:scale-110 duration-500 shadow-xl border ${item.rol === 'directivo' ? 'bg-gradient-to-br from-slate-700 to-slate-900 text-white border-white/20' : 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white border-white/20'}`}>
-                                {item.nombre.charAt(0)}
+                                {item.nombre ? item.nombre.charAt(0) : '?'}
                               </div>
                               <div>
                                  <div className="text-[12px] font-black text-white uppercase italic tracking-tight mb-1">{formatName(item.nombre)}</div>

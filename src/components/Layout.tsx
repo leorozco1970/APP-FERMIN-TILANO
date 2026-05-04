@@ -111,8 +111,7 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
 
   const handleLogout = async () => {
     await logout();
-    localStorage.removeItem('userRole');
-    localStorage.removeItem('teacherName');
+    localStorage.clear();
     setUserRole(null);
     setTeacherNameInput('');
     setPasswordInput('');

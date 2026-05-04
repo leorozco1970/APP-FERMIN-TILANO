@@ -115,7 +115,10 @@ export function Layout_Generic({ children, activeTab, setActiveTab }: LayoutProp
                          <span className="text-[10px] font-black text-emerald-500 tracking-widest uppercase">Admin OK</span>
                       </div>
                       <button 
-                        onClick={() => setIsAuthenticated(false)}
+                        onClick={() => {
+                          setIsAuthenticated(false);
+                          localStorage.clear();
+                        }}
                         className="p-3 bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white rounded-2xl transition-all border border-rose-500/20"
                       >
                         <LogOut size={18} />

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, query, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore';
+import { collection, query, getDocs, doc, setDoc, getDoc } from 'firebase/firestore';
 import { Reporte } from '../lib/types';
 import { PERIODOS, BARRERAS, DOCENTES } from '../lib/constants';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { GoogleGenAI, Type } from '@google/genai';
-import { Sparkles, Loader2, Download, CheckCircle2, ShieldAlert, Lightbulb, Copy, BookOpen, Cpu, MoveUp, Zap, AlertCircle } from 'lucide-react';
+import { Sparkles, Loader2, Download, CheckCircle2, ShieldAlert, Lightbulb, Copy, BookOpen, Cpu, MoveUp, Zap, AlertCircle, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { drawExecutiveHeader, drawExecutiveFooter, PDF_COLORS, PDF_MARGIN, INTRO_TEXTS } from '../lib/pdfUtils';
@@ -29,21 +29,26 @@ export function EnfoqueCritico() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
 
-  useEffect(() => {
+  const fetchData = async () => {
     if (!auth.currentUser) return;
-    const q = query(collection(db, 'reportes'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data: Reporte[] = [];
-      snapshot.forEach((doc) => {
-        data.push({ id: doc.id, ...doc.data() } as Reporte);
-      });
+    setLoading(true);
+    try {
+      const q = query(collection(db, 'reportes'));
+      const snapshot = await getDocs(q);
+      const data: Reporte[] = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data()
+      } as Reporte));
       setReportes(data);
-      setLoading(false);
-    }, (error) => {
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.LIST, 'reportes');
+    } finally {
       setLoading(false);
-    });
-    return () => unsubscribe();
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const filteredReportes = useMemo(() => {
@@ -389,7 +394,19 @@ ${aiAnalysis.superacionBarreras}
         title="ANALISIS PEDAGOGICO"
         description="Sincronización Pedagógica Integral: Análisis de Barreras y Despliegue de Intervenciones Críticas para la Transformación del Rendimiento Escolar"
         imageUrl="https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&q=80&w=800"
-      />
+      >
+        <div className="flex items-center gap-3 mt-6">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white font-bold py-2.5 px-6 rounded-xl transition-all border border-white/10 disabled:opacity-50 uppercase text-[11px] tracking-widest"
+            title="Actualizar Datos"
+          >
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            Actualizar
+          </button>
+        </div>
+      </PageHeader>
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-[#1e1e1e] p-6 rounded-3xl border border-white/5 shadow-2xl gap-6">
         <div className="flex items-center gap-4">

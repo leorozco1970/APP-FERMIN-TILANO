@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth } from '../lib/firebase';
-import { collection, query, getDocs, deleteDoc, writeBatch, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs, deleteDoc, writeBatch, orderBy } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { Reporte } from '../lib/types';
 import { PERIODOS, GRADOS, DOCENTES, AREAS } from '../lib/constants';
@@ -49,18 +49,48 @@ export function Informes() {
   const [isDeletingHistory, setIsDeletingHistory] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  useEffect(() => {
-    if (showHistoryModal) {
-      const q = query(collection(db, 'login_history'), orderBy('timestamp', 'desc'));
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        setLoginHistory(data as any);
-      }, (err) => {
-        console.error("Error en bitácora live:", err);
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const qReportes = query(collection(db, 'reportes'));
+      const qMatriculas = query(collection(db, 'matriculas'));
+      const qRetirados = query(collection(db, 'retirados'));
+
+      const [snapReportes, snapMatriculas, snapRetirados] = await Promise.all([
+        getDocs(qReportes),
+        getDocs(qMatriculas),
+        getDocs(qRetirados)
+      ]);
+
+      const reportsData: Reporte[] = snapReportes.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reporte));
+      setReportes(reportsData);
+
+      const matriculasData: Record<string, number> = {};
+      snapMatriculas.forEach(doc => {
+        matriculasData[doc.id] = doc.data().totalEstudiantes || 0;
       });
-      return () => unsubscribe();
+      setMatriculas(matriculasData);
+
+      setRetiradosCount(snapRetirados.size);
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.LIST, 'informes');
+    } finally {
+      setLoading(false);
     }
-  }, [showHistoryModal]);
+  };
+
+  const fetchHistory = async () => {
+    try {
+      const q = query(collection(db, 'login_history'), orderBy('timestamp', 'desc'));
+      const snap = await getDocs(q);
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setLoginHistory(data as any);
+      localStorage.setItem('admin_login_history_cache', JSON.stringify(data));
+    } catch (err) {
+      console.error("Error en bitácora:", err);
+      notify.error('ERROR AL CARGAR LA BITÁCORA.');
+    }
+  };
 
   const groupedLoginHistory = useMemo(() => {
     const groups: Record<string, { nombre: string; rol: string; entries: any[] }> = {};
@@ -92,78 +122,32 @@ export function Informes() {
       
       setLoginHistory([]);
       setShowDeleteConfirm(false);
-      notify.success('Historial de accesos eliminado correctamente.');
+      notify.success('HISTORIAL DE ACCESOS ELIMINADO CORRECTAMENTE.');
     } catch (e) {
       console.error("Error deleting history:", e);
-      notify.error('Error al eliminar el historial.');
+      notify.error('ERROR AL ELIMINAR EL HISTORIAL.');
     } finally {
       setIsDeletingHistory(false);
     }
   };
 
   useEffect(() => {
-    let unsubscribeReportes: () => void = () => {};
-    let unsubscribeMatriculas: () => void = () => {};
-    let unsubscribeRetirados: () => void = () => {};
-
-    const setupListeners = () => {
-      const qReportes = query(collection(db, 'reportes'));
-      unsubscribeReportes = onSnapshot(qReportes, (snapshot) => {
-        const data: Reporte[] = [];
-        snapshot.forEach((doc) => {
-          data.push({ id: doc.id, ...doc.data() } as Reporte);
-        });
-        setReportes(data);
-        setLoading(false);
-      }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'reportes');
-        setLoading(false);
-      });
-
-      const qMatriculas = query(collection(db, 'matriculas'));
-      unsubscribeMatriculas = onSnapshot(qMatriculas, (snapshot) => {
-        const data: Record<string, number> = {};
-        snapshot.forEach((doc) => {
-          data[doc.id] = doc.data().totalEstudiantes || 0;
-        });
-        setMatriculas(data);
-      }, (err) => {
-        console.warn("Error syncing matriculas:", err);
-      });
-
-      const qRetirados = query(collection(db, 'retirados'));
-      unsubscribeRetirados = onSnapshot(qRetirados, (snapshot) => {
-        setRetiradosCount(snapshot.size);
-      }, (err) => {
-        console.warn("Error syncing retirados count:", err);
-      });
-    };
-
-    if (auth.currentUser) {
-      setupListeners();
-    } else {
-      const authUnsub = auth.onAuthStateChanged((user) => {
-        if (user) {
-          setupListeners();
-          authUnsub();
-        } else {
-          setLoading(false);
-          authUnsub();
+    if (showHistoryModal) {
+      const cached = localStorage.getItem('admin_login_history_cache');
+      if (cached && loginHistory.length === 0) {
+        try {
+          setLoginHistory(JSON.parse(cached));
+        } catch (e) {
+          fetchHistory();
         }
-      });
-      return () => {
-        authUnsub();
-        unsubscribeReportes();
-        unsubscribeMatriculas();
-        unsubscribeRetirados();
-      };
+      } else {
+        fetchHistory();
+      }
     }
+  }, [showHistoryModal]);
 
-    return () => {
-      unsubscribeReportes();
-      unsubscribeMatriculas();
-      unsubscribeRetirados();
-    };
+  useEffect(() => {
+    fetchData();
   }, []);
 
   const getFilteredReportes = () => {
@@ -178,7 +162,7 @@ export function Informes() {
   const generarPDFBitacora = () => {
     try {
       if (groupedLoginHistory.length === 0) {
-        notify.warning('No hay datos de auditoría para exportar en este momento.');
+        notify.warning('NO HAY DATOS DE AUDITORÍA PARA EXPORTAR EN ESTE MOMENTO.');
         return;
       }
 
@@ -236,10 +220,10 @@ export function Informes() {
       }
 
       doc.save(`Bitacora_Auditoria_${new Date().getFullYear()}_${new Date().getMonth()+1}.pdf`);
-      notify.success('Bitácora exportada exitosamente.');
+      notify.success('BITÁCORA EXPORTADA EXITOSAMENTE.');
     } catch (e) {
       console.error("Error exportando bitácora:", e);
-      notify.error('Fallo técnico al generar el documento de auditoría.');
+      notify.error('FALLO TÉCNICO AL GENERAR EL DOCUMENTO DE AUDITORÍA.');
     }
   };
 
@@ -718,7 +702,19 @@ export function Informes() {
         title="REPORTES INSTITUCIONALES"
         description="Gestión y procesamiento de informes ejecutivos, actas de comisión."
         imageUrl="https://images.unsplash.com/photo-1589330694653-ded6df03f754?auto=format&fit=crop&q=80&w=1200"
-      />
+      >
+        <div className="flex items-center gap-3 mt-6">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-white font-bold py-2.5 px-6 rounded-xl transition-all border border-white/10 disabled:opacity-50 uppercase text-[11px] tracking-widest"
+            title="Actualizar Datos"
+          >
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+            Actualizar
+          </button>
+        </div>
+      </PageHeader>
 
       <div className="flex flex-col md:flex-row justify-between items-center bg-[#1e1e1e] p-8 rounded-3xl border border-white/5 mb-4 shadow-2xl">
         <div className="mb-4 md:mb-0">
@@ -821,6 +817,14 @@ export function Informes() {
                  </div>
                  
                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={fetchHistory}
+                      disabled={loading}
+                      className="p-3 bg-white/5 border border-white/10 text-blue-500 rounded-xl hover:bg-white/10 transition-all flex items-center justify-center group"
+                      title="Actualizar Bitácora"
+                    >
+                      <RefreshCw size={20} className={loading ? 'animate-spin' : 'group-active:rotate-180 transition-transform duration-500'} />
+                    </button>
                     <button
                       onClick={generarPDFBitacora}
                       disabled={loginHistory.length === 0}
